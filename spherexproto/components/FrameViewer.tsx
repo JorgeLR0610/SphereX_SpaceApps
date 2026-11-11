@@ -659,6 +659,31 @@ export function FrameViewer() {
                 <circle cx={selectedPixel.x} cy={selectedPixel.y} r="7" fill="none" stroke="currentColor" strokeWidth="0.8" strokeDasharray="2 2" className="animate-spin" />
               </g>
             )}
+
+            {/* Detective Found Celebration Burst */}
+            {detectiveFound && (
+              <g className="pointer-events-none">
+                {[0, 45, 90, 135, 180, 225, 270, 315].map((angle, idx) => {
+                  const rad = (angle * Math.PI) / 180;
+                  const x1 = currentTargetPos.x + Math.cos(rad) * 10;
+                  const y1 = currentTargetPos.y + Math.sin(rad) * 10;
+                  const x2 = currentTargetPos.x + Math.cos(rad) * 26;
+                  const y2 = currentTargetPos.y + Math.sin(rad) * 26;
+                  return (
+                    <line
+                      key={idx}
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      stroke={idx % 2 === 0 ? '#38bdf8' : '#ec4899'}
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                    />
+                  );
+                })}
+              </g>
+            )}
           </svg>
         </div>
 

@@ -72,8 +72,29 @@ export function SpectrumPanel() {
           </span>
         </div>
 
-        <div className="text-xs font-mono text-cyan-300 font-semibold truncate max-w-[220px]">
-          {objectIdentified}
+        <div className="flex items-center gap-2">
+          <div className="text-xs font-mono text-cyan-300 font-semibold truncate max-w-[180px]">
+            {objectIdentified}
+          </div>
+          <button
+            onClick={() => {
+              if (!spectrum || !spectrum.points) return;
+              const header = 'lambda_um,flux_mJy,uncertainty_mJy,detector_channel,band_index\n';
+              const rows = spectrum.points.map(p => `${p.lambda_um},${p.flux},${p.err},${p.detector},${p.bandIndex}`).join('\n');
+              const blob = new Blob([header + rows], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.download = `SPHEREx_Spectrum_${(objectIdentified || 'spectrum').replace(/\s+/g, '_')}_px${selectedPixel?.x}_${selectedPixel?.y}.csv`;
+              a.href = url;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            title="Exportar datos del espectro a archivo CSV"
+            className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-mono border border-slate-700 transition-colors"
+          >
+            <span>📥</span>
+            <span>CSV</span>
+          </button>
         </div>
       </div>
 

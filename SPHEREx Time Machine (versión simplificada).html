@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SPHEREx Time Machine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3f1f6;--panel:#fff;--ink:#17142a;--mute:#6a6580;--line:#dcd8e6;--acc:#e8365d;--sky:#0a0d1f;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b0d1c;--panel:#141733;--ink:#f1eefb;--mute:#9a95b8;--line:#272a4f;--acc:#ff5a7e}}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 "Bricolage Grotesque",system-ui,sans-serif}
+button,input{font:inherit;color:inherit}
+header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between;padding:16px clamp(16px,4vw,40px)}
+h1{margin:0;font-size:20px;font-weight:800}
+.search{flex:1;min-width:240px;max-width:460px;display:flex;gap:8px}
+.search input{flex:1;padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+.btn{border:0;background:var(--acc);color:#fff;padding:10px 18px;border-radius:999px;font-weight:600;cursor:pointer}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:0 clamp(16px,4vw,40px) 12px}
+.chip{flex:none;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 16px;cursor:pointer}
+.chip[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:24px;padding:8px clamp(16px,4vw,40px) 40px;max-width:1200px;margin:auto}
+@media(max-width:820px){main{grid-template-columns:1fr}}
+.stage{background:var(--sky);border-radius:20px;overflow:hidden;position:relative}
+canvas{display:block;width:100%;height:auto;aspect-ratio:1}
+.badge{position:absolute;left:14px;top:14px;background:#0009;color:#fff;padding:6px 12px;border-radius:999px;font-size:14px}
+.bar{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--sky);color:#fff}
+.play{width:46px;height:46px;border-radius:50%;border:0;background:var(--acc);color:#fff;font-size:18px;cursor:pointer;flex:none}
+.track{flex:1}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.dates{display:flex;justify-content:space-between;font-size:13px;color:#b9b5d6;margin-top:2px}
+.dates span.on{color:#fff;font-weight:600}
+aside h2{margin:0;font-size:32px;line-height:1.1;font-weight:800}
+.tag{color:var(--acc);font-weight:600;margin:6px 0 12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:16px}
+.facts{display:flex;gap:20px;flex-wrap:wrap;margin-top:12px}
+.facts b{display:block;font-size:20px}.facts small{color:var(--mute)}
+.switch{display:flex;gap:12px;align-items:center;cursor:pointer;font-weight:600}
+.switch input{width:22px;height:22px;accent-color:var(--acc)}
+.hint{color:var(--mute);font-size:14px;margin:6px 0 0 34px}
+details{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;font-weight:600}
+.row{margin:14px 0}.row label{display:block;font-size:14px;color:var(--mute);margin-bottom:4px}
+.bands{display:flex;gap:6px;flex-wrap:wrap}
+.band{border:1px solid var(--line);background:transparent;border-radius:10px;padding:6px 10px;cursor:pointer;font-size:14px}
+.band[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+#spec{width:100%;height:auto;margin-top:10px;display:block}
+.msg{color:var(--acc);font-size:14px;min-height:20px;padding:0 clamp(16px,4vw,40px)}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<header>
+  <h1>SPHEREx Time Machine</h1>
+  <form class="search" id="f"><input id="q" placeholder="Busca un objeto, p. ej. Barnard" aria-label="Buscar objeto"><button class="btn">Buscar</button></form>
+</header>
+<div class="chips" id="chips" role="group" aria-label="Objetos de ejemplo"></div>
+<div class="msg" id="msg" role="status"></div>
+<main>
+  <section>
+    <div class="stage">
+      <canvas id="c" width="560" height="560" aria-label="Imagen animada del cielo infrarrojo"></canvas>
+      <div class="badge" id="badge"></div>
+      <div class="bar">
+        <button class="play" id="play" aria-label="Pausar">❚❚</button>
+        <div class="track"><input type="range" id="t" min="0" max="300" value="0" aria-label="Línea de tiempo"><div class="dates" id="dates"></div></div>
+      </div>
+    </div>
+  </section>
+  <aside>
+    <h2 id="name"></h2>
+    <p class="tag" id="tag"></p>
+    <p id="hook"></p>
+    <div class="facts" id="facts"></div>
+    <div class="card">
+      <label class="switch"><input type="checkbox" id="hl" checked> Resaltar lo que cambia</label>
+      <p class="hint" id="hlhint"></p>
+    </div>
+    <details>
+      <summary>Más opciones</summary>
+      <div class="row"><label for="fov">Tamaño del área: <span id="fovv">5</span>′</label><input type="range" id="fov" min="1" max="30" value="5"></div>
+      <div class="row"><label>Colores del infrarrojo (de más azul a más rojo)</label><div class="bands" id="bands"></div></div>
+      <div class="row"><label for="ct">Contraste</label><input type="range" id="ct" min="30" max="100" value="65"></div>
+    </details>
+    <details>
+      <summary>Ver su huella infrarroja</summary>
+      <p class="hint" style="margin-left:0">Cada color del infrarrojo muestra cuánto brilla el objeto. Esa curva dice de qué está hecho y qué tan frío es.</p>
+      <canvas id="spec" width="460" height="200"></canvas>
+    </details>
+    <p class="hint" style="margin-left:0;margin-top:20px">Demo con datos simulados. En la versión final, las imágenes serán de SPHEREx y el movimiento se verá a escala real.</p>
+  </aside>
+</main>
+<script>
+const OBJ={
+ wise:{n:'WISE 0855',tag:'La enana marrón más fría cercana',hook:'Casi no tiene luz visible, pero brilla en infrarrojo. Mira cómo cruza el cielo mientras las estrellas de fondo se quedan quietas.',type:'mov',pm:[-1,.2],f:[['Distancia','7,3 años luz'],['Temperatura','−23 °C'],['Se mueve','8″ al año']],peak:.75,badge:'Objeto en movimiento'},
+ barnard:{n:'Estrella de Barnard',tag:'La estrella que más rápido cruza nuestro cielo',hook:'Es una enana roja vecina. Recorre el ancho de la Luna en unos 180 años.',type:'mov',pm:[.15,-1],f:[['Distancia','6 años luz'],['Temperatura','3 200 °C'],['Se mueve','10,4″ al año']],peak:.35,badge:'Objeto en movimiento'},
+ indi:{n:'Epsilon Indi B',tag:'Dos enanas marrones que viajan juntas',hook:'Son un par de “estrellas fallidas” que orbitan una estrella cercana. Busca los dos puntos que se desplazan a la vez.',type:'pair',pm:[.9,.5],f:[['Distancia','12 años luz'],['Temperatura','~1 000 °C'],['Se mueve','4,7″ al año']],peak:.6,badge:'Pareja en movimiento'},
+ rw:{n:'RW Aurigae',tag:'Una estrella joven que parpadea',hook:'No se desplaza: cambia de brillo. Fíjate en cómo se apaga y se enciende entre fechas.',type:'var',pm:[0,0],f:[['Distancia','450 años luz'],['Tipo','Estrella joven'],['Cambia','Brillo irregular']],peak:.4,badge:'Cambia de brillo'},
+ rdra:{n:'R Draconis',tag:'Un gigante que respira',hook:'Se hincha y se encoge en ciclos de unos 245 días. Su brillo sube y baja a lo largo del tiempo.',type:'var',pm:[0,0],f:[['Distancia','~1 000 años luz'],['Tipo','Gigante pulsante'],['Ciclo','~245 días']],peak:.3,badge:'Cambia de brillo'}
+};
+const DATES=['Jun 2025','Dic 2025','Jun 2026','Dic 2026'];
+const BANDS=[['Azul','0,75–1,1 µm'],['Verde','1,1–1,6'],['Amarillo','1,6–2,4'],['Naranja','2,4–3,8'],['Rojo','3,8–4,4'],['Rojo lejano','4,4–5']];
+let key='wise',t=0,playing=true,bandOn=BANDS.map(()=>true),last=0;
+const $=id=>document.getElementById(id),c=$('c'),g=c.getContext('2d');
+function rng(s){return()=>(s=(s*16807)%2147483647)/2147483647}
+let stars=[];
+function seed(){const r=rng(42+key.length*7);stars=Array.from({length:34},()=>({x:r()*560,y:r()*560,b:.25+r()*.75}))}
+function glow(x,y,rad,col,a){const gr=g.createRadialGradient(x,y,0,x,y,rad);gr.addColorStop(0,col.replace('A',a));gr.addColorStop(1,col.replace('A',0));g.fillStyle=gr;g.beginPath();g.arc(x,y,rad,0,7);g.fill()}
+function pos(o,tt){const k=Math.max(1,+$('fov').value/5);const s=70/Math.sqrt(k);return[280+o.pm[0]*s*(tt-1.5),280+o.pm[1]*s*(tt-1.5)]}
+function draw(){
+ const o=OBJ[key],hl=$('hl').checked,ct=$('ct').value/100,act=bandOn.filter(Boolean).length/6;
+ g.fillStyle='#0a0d1f';g.fillRect(0,0,560,560);
+ const dim=hl?.35:1,gain=ct*(.4+act*.6);
+ stars.forEach(s=>glow(s.x,s.y,10+s.b*14,'rgba(190,200,255,A)',s.b*gain*dim));
+ let ep=[];
+ if(o.type==='var'){
+  const ph=Math.sin(t*2.1+(key==='rdra'?0:1.3))*.5+.5,r=16+ph*26;
+  glow(280,280,r*1.8,'rgba(255,110,90,A)',(.35+ph*.65)*gain);
+  if(hl){g.strokeStyle='#ff5a7e';g.lineWidth=2;g.setLineDash([6,6]);g.beginPath();g.arc(280,280,48,0,7);g.stroke();g.setLineDash([])}
+ }else{
+  const offs=o.type==='pair'?[[-9,-5],[9,5]]:[[0,0]];
+  if(hl){g.strokeStyle='#ff5a7e88';g.lineWidth=2;g.setLineDash([4,7]);g.beginPath();for(let i=0;i<4;i++){const[p,q]=pos(o,i);i?g.lineTo(p,q):g.moveTo(p,q)}g.stroke();g.setLineDash([]);
+   for(let i=0;i<4;i++){const[p,q]=pos(o,i);g.fillStyle=i<=t+.01?'#ff5a7e':'#ff5a7e55';g.beginPath();g.arc(p,q,4,0,7);g.fill()}}
+  const[x,y]=pos(o,t);
+  offs.forEach(d=>glow(x+d[0],y+d[1],26,'rgba(255,90,120,A)',gain*1.1));
+  if(hl){g.strokeStyle='#ff5a7e';g.lineWidth=2.5;g.beginPath();g.arc(x,y,o.type==='pair'?34:30,0,7);g.stroke();
+   g.fillStyle='#ff5a7e';g.font='600 16px Bricolage Grotesque,sans-serif';g.fillText(o.n,x+40,y-30)}
+ }
+ const i=Math.round(t);document.querySelectorAll('#dates span').forEach((s,j)=>s.classList.toggle('on',j===i));
+}
+function spec(){
+ const s=$('spec'),h=s.getContext('2d'),o=OBJ[key];h.clearRect(0,0,460,200);
+ const cols=['#6aa7ff','#4fd1a5','#ffd34f','#ff9a3c','#ff5a7e','#b07cff'];
+ BANDS.forEach((b,i)=>{h.fillStyle=cols[i]+(bandOn[i]?'33':'0d');h.fillRect(10+i*74,10,72,150)});
+ h.strokeStyle=getComputedStyle(document.body).color;h.lineWidth=2.5;h.beginPath();
+ for(let x=0;x<=440;x++){const u=x/440,y=.15+.7*Math.exp(-Math.pow((u-o.peak)/.28,2))+.05*Math.sin(u*40);x?h.lineTo(10+x,160-y*140):h.moveTo(10,160-y*140)}h.stroke();
+ h.fillStyle='#8a86a8';h.font='12px sans-serif';h.fillText('más azul',10,185);h.fillText('más rojo',400,185);
+}
+function load(k){
+ key=k;const o=OBJ[k];seed();t=0;
+ $('name').textContent=o.n;$('tag').textContent=o.tag;$('hook').textContent=o.hook;$('badge').textContent=o.badge;
+ $('facts').innerHTML=o.f.map(f=>`<div><b>${f[1]}</b><small>${f[0]}</small></div>`).join('');
+ $('hlhint').textContent=o.type==='var'?'Marca la estrella que cambia de brillo y apaga el resto.':'Apaga las estrellas fijas y deja una estela con el recorrido.';
+ document.querySelectorAll('.chip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.k===k));
+ history.replaceState(null,'','#'+k);$('msg').textContent='';spec();
+}
+$('chips').innerHTML=Object.keys(OBJ).map(k=>`<button class="chip" data-k="${k}">${OBJ[k].n}</button>`).join('');
+$('chips').onclick=e=>e.target.dataset.k&&load(e.target.dataset.k);
+$('dates').innerHTML=DATES.map(d=>`<span>${d}</span>`).join('');
+$('bands').innerHTML=BANDS.map((b,i)=>`<button class="band" aria-pressed="true" data-i="${i}" title="${b[1]} µm">${b[0]}</button>`).join('');
+$('bands').onclick=e=>{const i=e.target.dataset.i;if(i==null)return;bandOn[i]=!bandOn[i];if(!bandOn.some(Boolean))bandOn[i]=true;e.target.setAttribute('aria-pressed',bandOn[i]);spec()};
+$('f').onsubmit=e=>{e.preventDefault();const v=$('q').value.toLowerCase().trim();
+ const k=Object.keys(OBJ).find(k=>OBJ[k].n.toLowerCase().includes(v)||k.includes(v)||(v==='wise 0855'&&k==='wise'));
+ k?load(k):$('msg').textContent='No encontré “'+$('q').value+'”. Prueba con uno de los ejemplos de arriba.'};
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'❚❚':'▶';$('play').setAttribute('aria-label',playing?'Pausar':'Reproducir')};
+$('t').oninput=e=>{playing=false;$('play').textContent='▶';t=e.target.value/100;draw()};
+['hl','ct','fov'].forEach(id=>$(id).addEventListener('input',()=>{$('fovv').textContent=$('fov').value;draw()}));
+const rm=matchMedia('(prefers-reduced-motion:reduce)').matches;if(rm)playing=false,$('play').textContent='▶';
+function loop(ts){if(playing){t=(t+(ts-last)/1600)%3;$('t').value=t*100}last=ts;draw();requestAnimationFrame(loop)}
+load(OBJ[location.hash.slice(1)]?location.hash.slice(1):'wise');requestAnimationFrame(loop);
+</script>
+</body>
+</html>

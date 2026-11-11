@@ -1,3 +1,4 @@
+/* eslint-disable */
 const tn = require('@tailwindcss/node');
 const fs = require('fs');
 const path = require('path');
