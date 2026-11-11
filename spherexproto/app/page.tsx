@@ -8,6 +8,13 @@ import { LandingHero } from '../components/LandingHero';
 import { MapModal } from '../components/MapModal';
 import { RetoModal } from '../components/RetoModal';
 import { GuidedTour } from '../components/GuidedTour';
+import { ConeSearchPanel } from '../components/ConeSearchPanel';
+import {
+  ConeResult,
+  ConeFilterType,
+  formatMovementSpeed,
+  formatSeparation,
+} from '../lib/coneSearch';
 
 export interface AstronomicalObject {
   id: string;
@@ -146,10 +153,15 @@ export default function Home() {
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
-  // Modals, Reto & Guided Tour state
+  // Modals, Reto, Guided Tour & Cone Search state
   const [isMapOpen, setIsMapOpen] = useState<boolean>(false);
   const [isRetoOpen, setIsRetoOpen] = useState<boolean>(false);
   const [isTourOpen, setIsTourOpen] = useState<boolean>(false);
+  const [isConeSearchOpen, setIsConeSearchOpen] = useState<boolean>(false);
+  const [coneResults, setConeResults] = useState<ConeResult[]>([]);
+  const [coneRadius, setConeRadius] = useState<number>(10);
+  const [coneFilters, setConeFilters] = useState<ConeFilterType[]>(['all']);
+
   const [retoFound, setRetoFound] = useState<boolean>(false);
   const [retoScore, setRetoScore] = useState<number>(0);
 
@@ -180,17 +192,74 @@ export default function Home() {
     }
   }, []);
 
-  // Check URL hash or query params on initial load
-  // If hash or query params present, skip landing and open viewer directly!
+  // Check URL parameters and hash on load
+  // Supports:
+  // - Hash: #wise, #barnard, etc.
+  // - Cone search params: ?ra=133.795&dec=-7.245&r=10&f=rapidos
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     const search = new URLSearchParams(window.location.search);
-    const hasQuery = search.has('ra') || search.has('target') || search.has('q');
+    const raParam = search.get('ra');
+    const decParam = search.get('dec');
+    const rParam = search.get('r');
+    const fParam = search.get('f');
+
+    if (raParam && decParam) {
+      const raVal = parseFloat(raParam);
+      const decVal = parseFloat(decParam);
+      const radVal = parseFloat(rParam || '10') || 10;
+
+      if (!isNaN(raVal) && !isNaN(decVal)) {
+        setConeRadius(radVal);
+        if (fParam) {
+          if (fParam === 'rapidos' || fParam === 'fast') setConeFilters(['fast']);
+          else if (fParam === 'enanas' || fParam === 'browndwarf') setConeFilters(['browndwarf']);
+          else if (fParam === 'variables' || fParam === 'variable') setConeFilters(['variable']);
+          else setConeFilters(['all']);
+        }
+
+        // Check if matches known preset
+        const matchedPresetKey = Object.keys(OBJ).find(
+          (k) => Math.hypot(OBJ[k].ra - raVal, OBJ[k].dec - decVal) < 0.05
+        );
+
+        if (matchedPresetKey) {
+          loadTarget(matchedPresetKey);
+        } else {
+          const customObj: AstronomicalObject = {
+            id: `custom_${raVal.toFixed(3)}_${decVal.toFixed(3)}`,
+            n: `Centro (${raVal.toFixed(3)}°, ${decVal.toFixed(3)}°)`,
+            tag: 'Coordenadas seleccionadas para exploración por radio',
+            hook: 'Vecindario celeste consultado con SPHEREx y catálogos estelares.',
+            type: 'mov',
+            icon: '🔭',
+            badge: 'Área explorada',
+            pm: [-0.4, 0.3],
+            f: [
+              ['RA', `${raVal.toFixed(3)}°`],
+              ['Dec', `${decVal.toFixed(3)}°`],
+              ['Radio', `${radVal}′`],
+            ],
+            peak: 0.5,
+            ra: raVal,
+            dec: decVal,
+            fitsId: `SPHX_CONE_${raVal.toFixed(2)}_${decVal.toFixed(2)}`,
+            mjd: 60841.5,
+          };
+          setTarget(customObj);
+          setKey(customObj.id);
+        }
+
+        setView('viewer');
+        setIsConeSearchOpen(true);
+        return;
+      }
+    }
 
     if (hash && OBJ[hash]) {
       loadTarget(hash);
       setView('viewer');
-    } else if (hasQuery) {
+    } else if (search.has('target') || search.has('q')) {
       const q = search.get('target') || search.get('q') || '';
       if (q && OBJ[q]) {
         loadTarget(q);
@@ -214,17 +283,97 @@ export default function Home() {
     }
   };
 
-  // Position calculation with FOV scaling
-  const getPos = useCallback((tt: number): [number, number] => {
-    const k = Math.max(1, fov / 5.0);
-    const s = 70.0 / Math.sqrt(k);
-    return [
-      280 + target.pm[0] * s * (tt - 1.5),
-      280 + target.pm[1] * s * (tt - 1.5),
-    ];
-  }, [fov, target.pm]);
+  // Handle selecting an item from the Cone Search results
+  const handleSelectConeResult = (item: ConeResult) => {
+    // Check if matches an existing preset
+    const presetKey = Object.keys(OBJ).find(
+      (k) =>
+        OBJ[k].n.toLowerCase() === item.name.toLowerCase() ||
+        Math.hypot(OBJ[k].ra - item.ra, OBJ[k].dec - item.dec) < 0.005
+    );
 
-  // Main Canvas render loop
+    if (presetKey) {
+      loadTarget(presetKey);
+    } else {
+      const isVar =
+        item.kindCode.startsWith('V') ||
+        item.kindCode.startsWith('Mi') ||
+        item.kindLabel.toLowerCase().includes('cambia');
+      const isBrownDwarf =
+        item.kindCode.startsWith('BD') || item.kindLabel.toLowerCase().includes('marrón');
+
+      // Scaled proper motion for animation
+      const scalePm = item.pmArcsecPerYear > 0 ? Math.min(1.8, Math.max(0.2, item.pmArcsecPerYear / 2.0)) : 0.3;
+      const pmX = item.pmRa !== 0 ? (item.pmRa / Math.hypot(item.pmRa, item.pmDec || 1)) * scalePm : 0;
+      const pmY = item.pmDec !== 0 ? (item.pmDec / Math.hypot(item.pmRa || 1, item.pmDec)) * scalePm : 0;
+
+      const newTarget: AstronomicalObject = {
+        id: item.id,
+        n: item.name,
+        tag: item.kindLabel,
+        hook: isBrownDwarf
+          ? 'Enana marrón detectada en el infrarrojo profundo. Observa su desplazamiento en el cielo mientras las estrellas lejanas están fijas.'
+          : isVar
+          ? 'Estrella variable: fíjate en cómo cambia su brillo en las cuatro épocas de SPHEREx.'
+          : 'Objeto detectado en el radio de búsqueda con el telescopio espacial SPHEREx.',
+        type: isVar ? 'var' : 'mov',
+        icon: isBrownDwarf ? '🟤' : isVar ? '💫' : item.pmArcsecPerYear >= 0.2 ? '🔴' : '⭐',
+        badge: item.kindLabel,
+        pm: isVar ? [0, 0] : [pmX, -pmY],
+        f: [
+          ['Distancia', item.distanceLy || 'En catálogo'],
+          ['Movimiento', formatMovementSpeed(item.pmArcsecPerYear)],
+          ['Separación', formatSeparation(item.sepArcsec)],
+        ],
+        peak: isBrownDwarf ? 0.75 : isVar ? 0.4 : 0.5,
+        ra: item.ra,
+        dec: item.dec,
+        fitsId: `SPHX_OBJ_${item.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        mjd: 60841.5,
+      };
+
+      setTarget(newTarget);
+      setKey(item.id);
+      setTime(0);
+      setPlaying(true);
+
+      // Re-seed background stars for new area
+      const r = rng(42 + item.name.length * 9);
+      starsRef.current = Array.from({ length: 34 }, () => ({
+        x: r() * 560,
+        y: r() * 560,
+        b: 0.25 + r() * 0.75,
+      }));
+    }
+
+    // Sync URL with parameters
+    if (typeof window !== 'undefined') {
+      const fSlug = coneFilters.includes('fast')
+        ? 'rapidos'
+        : coneFilters.includes('browndwarf')
+        ? 'enanas'
+        : coneFilters.includes('variable')
+        ? 'variables'
+        : 'todos';
+      const newUrl = `?ra=${item.ra.toFixed(4)}&dec=${item.dec.toFixed(4)}&r=${coneRadius}&f=${fSlug}`;
+      history.replaceState(null, '', newUrl);
+    }
+  };
+
+  // Position calculation with FOV scaling
+  const getPos = useCallback(
+    (tt: number): [number, number] => {
+      const k = Math.max(1, fov / 5.0);
+      const s = 70.0 / Math.sqrt(k);
+      return [
+        280 + target.pm[0] * s * (tt - 1.5),
+        280 + target.pm[1] * s * (tt - 1.5),
+      ];
+    },
+    [fov, target.pm]
+  );
+
+  // Main Canvas render loop (including Search Radius Circle and Result Markers)
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -256,7 +405,79 @@ export default function Home() {
       glow(s.x, s.y, 10 + s.b * 14, 'rgba(190,200,255,A)', s.b * gain * dim);
     });
 
-    // 2. Draw target object
+    // 2. Draw search radius circle on viewer canvas
+    if (coneRadius > 0 && (coneResults.length > 0 || isConeSearchOpen)) {
+      const pxRadius = coneRadius * (560.0 / fov);
+      if (pxRadius > 15) {
+        g.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+        g.lineWidth = 1.5;
+        g.setLineDash([6, 6]);
+        g.beginPath();
+        g.arc(280, 280, pxRadius, 0, 2 * Math.PI);
+        g.stroke();
+        g.setLineDash([]);
+
+        // Radius label
+        if (pxRadius > 35 && pxRadius < 270) {
+          g.fillStyle = 'rgba(56, 189, 248, 0.85)';
+          g.font = '600 11px monospace';
+          g.textAlign = 'center';
+          g.fillText(`Radio: ${coneRadius}′`, 280, Math.max(16, 280 - pxRadius - 6));
+        }
+      }
+    }
+
+    // 3. Draw numbered markers for Cone Search results
+    if (coneResults.length > 0) {
+      const cosDec = Math.cos((target.dec * Math.PI) / 180.0);
+      const safeCosDec = Math.abs(cosDec) > 0.05 ? cosDec : 0.05;
+      const pxPerArcmin = 560.0 / fov;
+
+      coneResults.slice(0, 20).forEach((item) => {
+        const dRaArcmin = (item.ra - target.ra) * safeCosDec * 60.0;
+        const dDecArcmin = (item.dec - target.dec) * 60.0;
+
+        // RA increases to the left (-x), Dec increases up (-y on canvas)
+        const mx = 280 - dRaArcmin * pxPerArcmin;
+        const my = 280 - dDecArcmin * pxPerArcmin;
+
+        // Avoid drawing directly on top of the central object
+        const distFromCenter = Math.hypot(mx - 280, my - 280);
+        if (distFromCenter < 14) return;
+
+        if (mx >= 12 && mx <= 548 && my >= 12 && my <= 548) {
+          // Outer subtle ring
+          g.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+          g.lineWidth = 1.5;
+          g.beginPath();
+          g.arc(mx, my, 11, 0, 2 * Math.PI);
+          g.stroke();
+
+          // Inner fill
+          g.fillStyle = 'rgba(11, 13, 28, 0.9)';
+          g.beginPath();
+          g.arc(mx, my, 10, 0, 2 * Math.PI);
+          g.fill();
+
+          // Number badge
+          g.fillStyle = '#ffffff';
+          g.font = 'bold 10px "Bricolage Grotesque", system-ui, sans-serif';
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.fillText(String(item.number), mx, my);
+
+          // Small tag label
+          g.fillStyle = '#38bdf8';
+          g.font = '600 10px "Bricolage Grotesque", system-ui, sans-serif';
+          g.textAlign = 'left';
+          g.textBaseline = 'middle';
+          const shortName = item.name.length > 14 ? item.name.slice(0, 12) + '…' : item.name;
+          g.fillText(shortName, mx + 14, my);
+        }
+      });
+    }
+
+    // 4. Draw central target object
     if (target.type === 'var') {
       const ph = Math.sin(time * 2.1 + (key === 'rdra' ? 0 : 1.3)) * 0.5 + 0.5;
       const r = 16 + ph * 26;
@@ -273,6 +494,8 @@ export default function Home() {
 
         g.fillStyle = '#ff5a7e';
         g.font = '600 16px "Bricolage Grotesque", system-ui, sans-serif';
+        g.textAlign = 'left';
+        g.textBaseline = 'alphabetic';
         g.fillText(target.n, 335, 275);
       }
     } else {
@@ -316,10 +539,12 @@ export default function Home() {
 
         g.fillStyle = '#ff5a7e';
         g.font = '600 16px "Bricolage Grotesque", system-ui, sans-serif';
+        g.textAlign = 'left';
+        g.textBaseline = 'alphabetic';
         g.fillText(target.n, x + 40, y - 25);
       }
     }
-  }, [contrast, bandOn, highlight, target, time, key, getPos]);
+  }, [contrast, bandOn, highlight, target, time, key, getPos, coneRadius, coneResults, isConeSearchOpen, fov]);
 
   // Spectrum chart render
   const drawSpectrum = useCallback(() => {
@@ -351,6 +576,7 @@ export default function Home() {
 
     h.fillStyle = '#9a95b8';
     h.font = '12px "Bricolage Grotesque", system-ui, sans-serif';
+    h.textAlign = 'left';
     h.fillText('más azul (0,75 µm)', 10, 185);
     h.fillText('más rojo (5,0 µm)', 340, 185);
   }, [bandOn, target.peak]);
@@ -382,7 +608,7 @@ export default function Home() {
     }
   }, [view, drawSpectrum]);
 
-  // Canvas click to detect target in Reto mode
+  // Canvas click: handles clicking on target (for Reto) or on a Cone Result marker
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -391,6 +617,27 @@ export default function Home() {
     const cx = (e.clientX - rect.left) * scale;
     const cy = (e.clientY - rect.top) * scale;
 
+    // 1. Check if clicked on a Cone Result marker
+    if (coneResults.length > 0) {
+      const cosDec = Math.cos((target.dec * Math.PI) / 180.0);
+      const safeCosDec = Math.abs(cosDec) > 0.05 ? cosDec : 0.05;
+      const pxPerArcmin = 560.0 / fov;
+
+      for (const item of coneResults.slice(0, 20)) {
+        const dRaArcmin = (item.ra - target.ra) * safeCosDec * 60.0;
+        const dDecArcmin = (item.dec - target.dec) * 60.0;
+        const mx = 280 - dRaArcmin * pxPerArcmin;
+        const my = 280 - dDecArcmin * pxPerArcmin;
+
+        if (Math.hypot(cx - mx, cy - my) <= 16) {
+          sound.playTargetSelect();
+          handleSelectConeResult(item);
+          return;
+        }
+      }
+    }
+
+    // 2. Check if clicked on the current target (for Reto Detective)
     const [tx, ty] = target.type === 'var' ? [280, 280] : getPos(time);
     const dist = Math.hypot(cx - tx, cy - ty);
 
@@ -493,6 +740,10 @@ export default function Home() {
           objects={OBJ}
           onSelect={handleSelectObject}
           onSearch={handleSearch}
+          onOpenConeSearch={() => {
+            setView('viewer');
+            setIsConeSearchOpen(true);
+          }}
           isSearching={isSearching}
           searchMessage={searchMessage}
         />
@@ -502,8 +753,8 @@ export default function Home() {
         /* ============================================================== */
         <div className="flex flex-col flex-1">
           {/* Header Bar */}
-          <header className="flex flex-wrap gap-3 items-center justify-between px-4 sm:px-8 py-3.5 border-b border-[#272a4f] bg-[#0b0d1c]/90 backdrop-blur-md sticky top-0 z-30">
-            <div className="flex items-center gap-3">
+          <header className="flex flex-wrap gap-2.5 sm:gap-4 items-center justify-between px-4 sm:px-8 py-3.5 border-b border-[#272a4f] bg-[#0b0d1c]/90 backdrop-blur-md sticky top-0 z-30">
+            <div className="flex items-center gap-2.5">
               <button
                 onClick={() => {
                   setView('landing');
@@ -518,14 +769,14 @@ export default function Home() {
 
               <h1
                 onClick={() => setView('landing')}
-                className="text-lg sm:text-xl font-extrabold text-white tracking-tight cursor-pointer hover:text-[#ff5a7e] transition-colors hidden sm:block"
+                className="text-lg font-extrabold text-white tracking-tight cursor-pointer hover:text-[#ff5a7e] transition-colors hidden md:block"
               >
                 SPHEREx Time Machine
               </h1>
             </div>
 
             {/* Quick Object Switcher Chips */}
-            <div className="hidden md:flex gap-1.5 overflow-x-auto no-scrollbar" role="group" aria-label="Objetos de ejemplo">
+            <div className="hidden lg:flex gap-1.5 overflow-x-auto no-scrollbar" role="group" aria-label="Objetos de ejemplo">
               {Object.keys(OBJ).map((k) => (
                 <button
                   key={k}
@@ -541,8 +792,41 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Header Right Actions */}
+            {/* Search Input & Secondary Button: Explorar Alrededores */}
             <div className="flex items-center gap-2">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSearch(searchQuery);
+                }}
+                className="relative hidden sm:flex items-center"
+              >
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar objeto..."
+                  className="w-36 md:w-48 px-3 py-1.5 rounded-full border border-[#272a4f] bg-[#141733] text-xs text-white placeholder-[#9a95b8] focus:outline-none focus:border-[#ff5a7e]"
+                />
+              </form>
+
+              {/* Botón secundario: Explorar alrededores */}
+              <button
+                type="button"
+                onClick={() => setIsConeSearchOpen(true)}
+                title="Buscar objetos en un radio de 1′ a 60′"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#141733] hover:bg-[#1e224d] border border-[#272a4f] hover:border-[#38bdf8] text-xs font-bold text-[#38bdf8] transition-all cursor-pointer shadow-sm hover:shadow"
+              >
+                <span>🔭</span>
+                <span className="hidden sm:inline">Explorar alrededores</span>
+                <span className="sm:hidden">Radio</span>
+                {coneResults.length > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-[#38bdf8]/20 text-[#38bdf8] text-[10px] font-extrabold">
+                    {coneResults.length}
+                  </span>
+                )}
+              </button>
+
               <button
                 onClick={() => setIsTourOpen(true)}
                 title="Repetir tour guiado"
@@ -579,7 +863,7 @@ export default function Home() {
                   width={560}
                   height={560}
                   onClick={handleCanvasClick}
-                  aria-label="Imagen animada del cielo infrarrojo"
+                  aria-label="Imagen animada del cielo infrarrojo con marcadores de búsqueda"
                   className="block w-full h-auto aspect-square cursor-crosshair"
                 />
 
@@ -588,6 +872,14 @@ export default function Home() {
                   <span className="w-2 h-2 rounded-full bg-[#ff5a7e] animate-ping" />
                   <span>{target.badge}</span>
                 </div>
+
+                {/* Number of nearby objects badge if cone search active */}
+                {coneResults.length > 0 && (
+                  <div className="absolute right-3.5 top-3.5 bg-[#0a0d1f]/85 backdrop-blur-md text-[#38bdf8] px-3 py-1 rounded-full text-xs font-mono font-bold border border-[#38bdf8]/30 flex items-center gap-1.5">
+                    <span>🔭</span>
+                    <span>Radio {coneRadius}′: {coneResults.length} objetos</span>
+                  </div>
+                )}
 
                 {/* Bottom Playback Bar */}
                 <div className="flex items-center gap-3.5 px-4 py-3 bg-[#0a0d1f] border-t border-[#272a4f] text-white">
@@ -812,6 +1104,22 @@ export default function Home() {
           </main>
         </div>
       )}
+
+      {/* Cone Search Lateral Panel (Explorar Alrededores por Radio) */}
+      <ConeSearchPanel
+        isOpen={isConeSearchOpen}
+        onClose={() => setIsConeSearchOpen(false)}
+        currentRa={target.ra}
+        currentDec={target.dec}
+        currentName={target.n}
+        onSelectResult={handleSelectConeResult}
+        onResultsChange={(results, rad) => {
+          setConeResults(results);
+          setConeRadius(rad);
+        }}
+        initialRadius={coneRadius}
+        initialFilters={coneFilters}
+      />
 
       {/* Guided Tour Didactic Balloons (Momento 2) */}
       <GuidedTour

@@ -16,6 +16,7 @@ interface LandingHeroProps {
   objects: Record<string, AstronomicalObject>;
   onSelect: (key: string) => void;
   onSearch: (query: string) => void;
+  onOpenConeSearch?: () => void;
   isSearching: boolean;
   searchMessage: string;
 }
@@ -24,6 +25,7 @@ export function LandingHero({
   objects,
   onSelect,
   onSearch,
+  onOpenConeSearch,
   isSearching,
   searchMessage,
 }: LandingHeroProps) {
@@ -190,6 +192,19 @@ export function LandingHero({
               {isSearching ? '...' : 'Buscar'}
             </button>
           </form>
+
+          {onOpenConeSearch && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={onOpenConeSearch}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#141733]/80 hover:bg-[#141733] border border-[#272a4f] hover:border-[#38bdf8] text-xs font-semibold text-[#38bdf8] transition-all cursor-pointer shadow-sm hover:shadow"
+              >
+                <span>🔭</span>
+                <span>Explorar alrededores por radio</span>
+              </button>
+            </div>
+          )}
 
           {searchMessage && (
             <div className="text-[#ff5a7e] text-xs mt-2 text-center" role="status">

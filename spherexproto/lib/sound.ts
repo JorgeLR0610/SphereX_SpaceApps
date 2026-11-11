@@ -76,6 +76,10 @@ class SoundEffects {
     }
   }
 
+  public playTargetSelect() {
+    this.playBlip(720, 0.06);
+  }
+
   public toggleMute() {
     this.enabled = !this.enabled;
     return this.enabled;
