@@ -22,10 +22,12 @@ from spherex.models import (
 )
 
 
-# Verified M101 coordinates and default parameters
+# Verified M101 coordinates and parameters
 M101_RA = 210.80227
 M101_DEC = 54.34895
 M101_DEFAULT_FOV = 3.0
+M101_SUPPORTED_FOV_MIN = 2.5
+M101_SUPPORTED_FOV_MAX = 3.5
 M101_DETECTOR = 2
 
 
@@ -33,21 +35,33 @@ class UnsupportedRegionError(Exception):
     """Raised when coordinates do not match any verified SPHEREx region."""
     def __init__(self, ra: float, dec: float):
         super().__init__(
-            f"Region RA={ra:.5f}, Dec={dec:.5f} is not supported in the M2 MVP. "
+            f"Region RA={ra:.5f}, Dec={dec:.5f} is not supported in the M2/M3 MVP. "
             f"Currently supported verified region: M101 (RA={M101_RA}, Dec={M101_DEC}, detector={M101_DETECTOR})."
         )
         self.ra = ra
         self.dec = dec
 
 
-class DataUnavailableError(Exception):
-    """Raised when locally cached scientific products are not found on disk."""
-    def __init__(self, path: Path):
+class UnsupportedFovError(Exception):
+    """Raised when requested FOV does not correspond to the fixed cached dataset."""
+    def __init__(self, fov: float):
         super().__init__(
-            f"Cached scientific products for M101 not found at '{path}'. "
-            f"Run `python -m spherex.prepare --output {path}` to prepare the validated dataset."
+            f"Requested FOV={fov:.2f} arcmin is not supported for the cached M101 dataset. "
+            f"The verified M101 dataset is fixed at FOV=3.0 arcmin (supported range: [{M101_SUPPORTED_FOV_MIN}, {M101_SUPPORTED_FOV_MAX}] arcmin)."
         )
+        self.fov = fov
+
+
+class DataUnavailableError(Exception):
+    """Raised when locally cached scientific products are not found or unusable on disk."""
+    def __init__(self, path: Path, reason: Optional[str] = None):
+        msg = f"Cached scientific products for M101 not usable at '{path}'"
+        if reason:
+            msg += f": {reason}"
+        msg += f". Run `python -m spherex.prepare --output {path}` to prepare the validated dataset."
+        super().__init__(msg)
         self.path = path
+        self.reason = reason
 
 
 def get_default_data_dir() -> Path:
@@ -60,14 +74,46 @@ def get_default_data_dir() -> Path:
     return server_root / "outputs" / "m101"
 
 
-def is_m101_region(ra: float, dec: float, fov_arcmin: float) -> bool:
-    """Check if requested coordinates match the verified M101 field within FOV tolerance."""
+def verify_dataset_usability(data_dir: Path) -> tuple[bool, str | None]:
+    """Verify that cached aligned.fits and manifest.json exist and are scientifically usable."""
+    data_dir = Path(data_dir)
+    aligned_fits_path = data_dir / "aligned.fits"
+    manifest_path = data_dir / "manifest.json"
+
+    if not aligned_fits_path.exists() or not manifest_path.exists():
+        return False, f"Missing required files in {data_dir}"
+
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        if manifest.get("status") != "visualization_pair_validated":
+            return False, f"Manifest status is '{manifest.get('status')}', expected 'visualization_pair_validated'"
+        comp = manifest.get("comparison")
+        if not comp or "observations" not in comp or len(comp["observations"]) < 2:
+            return False, "Manifest lacks comparison observations"
+    except Exception as exc:
+        return False, f"Invalid manifest.json: {exc}"
+
+    try:
+        with fits.open(aligned_fits_path, memmap=False) as hdus:
+            for name in ("IMAGE1", "IMAGE2", "VALID"):
+                if name not in hdus:
+                    return False, f"aligned.fits missing required HDU: {name}"
+            if hdus["IMAGE1"].shape != (30, 30) or hdus["IMAGE2"].shape != (30, 30) or hdus["VALID"].shape != (30, 30):
+                return False, f"Unexpected HDU shapes in {aligned_fits_path}"
+            if not np.isfinite(hdus["VALID"].data).all():
+                return False, "Non-finite values in VALID HDU"
+    except Exception as exc:
+        return False, f"Invalid aligned.fits: {exc}"
+
+    return True, None
+
+
+def is_m101_region(ra: float, dec: float, tolerance_arcmin: float = 2.5) -> bool:
+    """Check if requested coordinates match the verified M101 field within spatial tolerance."""
     coord = SkyCoord(ra, dec, unit="deg", frame="icrs")
     m101 = SkyCoord(M101_RA, M101_DEC, unit="deg", frame="icrs")
     sep_arcmin = coord.separation(m101).arcmin
-    # Allow separation within half the comparison field of view or 2.5 arcmin
-    tolerance = max(2.5, fov_arcmin / 2.0)
-    return sep_arcmin <= tolerance
+    return sep_arcmin <= tolerance_arcmin
 
 
 def compute_stats(data: np.ndarray, valid_mask: np.ndarray) -> FrameStatsModel:
@@ -92,23 +138,18 @@ def load_m101_frames(
     if data_dir is None:
         data_dir = get_default_data_dir()
 
-    aligned_fits_path = data_dir / "aligned.fits"
-    manifest_path = data_dir / "manifest.json"
+    is_usable, reason = verify_dataset_usability(data_dir)
+    if not is_usable:
+        raise DataUnavailableError(data_dir, reason=reason)
 
-    if not aligned_fits_path.exists() or not manifest_path.exists():
-        raise DataUnavailableError(data_dir)
+    manifest_path = data_dir / "manifest.json"
+    aligned_fits_path = data_dir / "aligned.fits"
 
     manifest = json.loads(manifest_path.read_text())
-    comp = manifest.get("comparison")
-    if not comp or "observations" not in comp or len(comp["observations"]) < 2:
-        raise ValueError(f"Manifest at {manifest_path} lacks required comparison observations")
-
+    comp = manifest["comparison"]
     obs_a, obs_b = comp["observations"][:2]
 
     with fits.open(aligned_fits_path, memmap=False) as hdus:
-        if "IMAGE1" not in hdus or "IMAGE2" not in hdus or "VALID" not in hdus:
-            raise ValueError(f"aligned.fits at {aligned_fits_path} lacks required HDUs")
-
         raw_img1 = hdus["IMAGE1"].data.astype(float)
         raw_img2 = hdus["IMAGE2"].data.astype(float)
         raw_valid = hdus["VALID"].data.astype(int)
@@ -143,6 +184,8 @@ def load_m101_frames(
         size=[width, height],
     )
 
+    # Note: Rather than labeling entire observation as "clean", accurately indicate
+    # contamination/masking status (cutout boundary filtering is active).
     frame_1 = FrameModel(
         id=obs_a["obs_id"],
         mjd=float(obs_a["mjd_obs"]),
@@ -155,7 +198,7 @@ def load_m101_frames(
             detector=int(obs_a["detector"]),
             index=0,
         ),
-        flags=["clean"],
+        flags=["contaminated_edge"],
         width=width,
         height=height,
         pixelData=clean_img1,
@@ -163,6 +206,7 @@ def load_m101_frames(
         validMask=valid_mask_flat,
         units="MJy / sr",
         provenance={
+            "data_origin": "observed_spherex",
             "collection": obs_a.get("collection", "spherex_qr3"),
             "access_url": obs_a.get("access_url"),
             "valid_fraction": float(obs_a.get("valid_fraction", 0.0)),
@@ -181,7 +225,7 @@ def load_m101_frames(
             detector=int(obs_b["detector"]),
             index=0,
         ),
-        flags=["clean"],
+        flags=["contaminated_edge"],
         width=width,
         height=height,
         pixelData=clean_img2,
@@ -189,6 +233,7 @@ def load_m101_frames(
         validMask=valid_mask_flat,
         units="MJy / sr",
         provenance={
+            "data_origin": "observed_spherex",
             "collection": obs_b.get("collection", "spherex_qr3"),
             "access_url": obs_b.get("access_url"),
             "valid_fraction": float(obs_b.get("valid_fraction", 0.0)),
@@ -253,7 +298,10 @@ def get_frames(
     data_dir: Optional[Path] = None,
 ) -> FramesResponseModel:
     """Query frames for given coordinates, mapping to verified M101 observations if matched."""
-    if not is_m101_region(ra, dec, fov_arcmin):
+    if not is_m101_region(ra, dec):
         raise UnsupportedRegionError(ra, dec)
+
+    if not (M101_SUPPORTED_FOV_MIN <= fov_arcmin <= M101_SUPPORTED_FOV_MAX):
+        raise UnsupportedFovError(fov_arcmin)
 
     return load_m101_frames(target_name=target_name, data_dir=data_dir)

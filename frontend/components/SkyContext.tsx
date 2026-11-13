@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
+import React from 'react';
+import { useSpherexStore } from '../store/useSpherexStore';
 import { formatSexagesimal } from '../lib/wcs';
-import { getCatalogMarkers } from '../lib/mockData';
 
 // Add Compass icon if needed or use custom SVG
 function CompassSvg({ size = 16, className = '' }: { size?: number; className?: string }) {
@@ -16,11 +15,9 @@ function CompassSvg({ size = 16, className = '' }: { size?: number; className?: 
 }
 
 export function SkyContext() {
-  const { target, fov, currentEpoch, epochs } = useSpherexStore();
-  const [aladinMode, setAladinMode] = useState<'interactive' | 'aladinLite'>('interactive');
+  const { target, fov } = useSpherexStore();
 
   const { raStr, decStr } = formatSexagesimal(target.ra, target.dec);
-  const catalogMarkers = getCatalogMarkers(spherexStore.getState() as unknown as import('../lib/types').FramesResponse);
 
   // Aladin Lite CDS URL
   const aladinUrl = `https://aladin.cds.unistra.fr/AladinLite/?target=${target.ra.toFixed(4)}%20${target.dec.toFixed(4)}&fov=${(fov / 60.0).toFixed(3)}&survey=P%2FallWISE%2Fcolor`;

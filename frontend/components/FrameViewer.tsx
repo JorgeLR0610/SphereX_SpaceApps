@@ -7,11 +7,8 @@ import { pixelToCelestial, computeProperMotionDisplacement } from '../lib/wcs';
 import { getCatalogMarkers } from '../lib/mockData';
 import { createAnimatedGif } from '../lib/gifEncoder';
 import { 
-  CrosshairIcon, 
-  SparklesIcon, 
   EyeIcon, 
   DownloadIcon, 
-  ActivityIcon,
   PlayIcon,
   PauseIcon,
   SkipBackIcon,
@@ -38,10 +35,12 @@ export function FrameViewer() {
     wcs,
     fov,
     selectedPixel,
-    hoverCoords,
     isLoading,
+    error,
+    target,
     playing,
     fps,
+    provenance,
   } = useSpherexStore();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -64,12 +63,15 @@ export function FrameViewer() {
     return () => clearInterval(timer);
   }, [playing, fps]);
 
-  // Blink Mode: rapidly toggles between Epoch 1 (index 0) and Epoch 4 (index 3)
+  // Blink Mode: rapidly toggles between first and last epoch (Epoch 1 <-> Epoch N)
   useEffect(() => {
     if (!blinkMode) return;
     const interval = setInterval(() => {
-      const curr = spherexStore.getState().currentEpoch;
-      spherexStore.setCurrentEpoch(curr === 0 ? 3 : 0);
+      const state = spherexStore.getState();
+      const curr = state.currentEpoch;
+      const numEpochs = state.epochs.length || 2;
+      const maxEp = Math.max(1, numEpochs - 1);
+      spherexStore.setCurrentEpoch(curr === 0 ? maxEp : 0);
     }, 550); // ~1.8 Hz classic blink rate
     return () => clearInterval(interval);
   }, [blinkMode]);
@@ -77,9 +79,15 @@ export function FrameViewer() {
   // Trigger celebratory banner animation when target is found in Detective Mode
   useEffect(() => {
     if (detectiveFound) {
-      setShowDetectiveBanner(true);
-      const timer = setTimeout(() => setShowDetectiveBanner(false), 5000);
-      return () => clearTimeout(timer);
+      const showTimer = setTimeout(() => setShowDetectiveBanner(true), 0);
+      const hideTimer = setTimeout(() => setShowDetectiveBanner(false), 5000);
+      return () => {
+        clearTimeout(showTimer);
+        clearTimeout(hideTimer);
+      };
+    } else {
+      const resetTimer = setTimeout(() => setShowDetectiveBanner(false), 0);
+      return () => clearTimeout(resetTimer);
     }
   }, [detectiveFound]);
 
@@ -196,10 +204,19 @@ export function FrameViewer() {
     const data32 = new Uint32Array(imgData.data.buffer);
     const lut = getColormapLut(colormap);
 
+    const epIdx = currentEpoch;
+    const currentFrameObj = frames.find(f => f.epochIndex === epIdx && detectors[f.detector - 1]) || frames[0];
+    const validMask = currentFrameObj?.validMask;
+
     if (mode === 'diff') {
       // Symmetrical difference stretch around 0
       const diffRange = Math.max(25, stretch.max * 0.45);
       for (let i = 0; i < buffer.length; i++) {
+        if (validMask && validMask[i] === 0) {
+          // Muted slate blue #2b3d5b (r: 43, g: 61, b: 91)
+          data32[i] = (255 << 24) | (91 << 16) | (61 << 8) | 43;
+          continue;
+        }
         const val = buffer[i];
         const norm = Math.max(0, Math.min(1, (val + diffRange) / (2 * diffRange)));
         const lutIdx = Math.floor(norm * 255);
@@ -209,6 +226,11 @@ export function FrameViewer() {
     } else {
       // Normal or Stack stretch
       for (let i = 0; i < buffer.length; i++) {
+        if (validMask && validMask[i] === 0) {
+          // Muted slate blue #2b3d5b (r: 43, g: 61, b: 91)
+          data32[i] = (255 << 24) | (91 << 16) | (61 << 8) | 43;
+          continue;
+        }
         const val = buffer[i];
         const stretched = applyStretch(val, stretch.min, stretch.max, stretch.fn);
         const lutIdx = Math.floor(Math.max(0, Math.min(1, stretched)) * 255);
@@ -218,7 +240,7 @@ export function FrameViewer() {
     }
 
     ctx.putImageData(imgData, 0, 0);
-  }, [computeDisplayBuffer, colormap, mode, stretch, frames]);
+  }, [computeDisplayBuffer, colormap, mode, stretch, frames, currentEpoch, detectors]);
 
   // Coordinate mouse inspection
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -235,14 +257,19 @@ export function FrameViewer() {
     if (pxX >= 0 && pxX < canvas.width && pxY >= 0 && pxY < canvas.height) {
       const cel = pixelToCelestial(pxX, pxY, wcs);
       const buffer = computeDisplayBuffer();
-      const fluxVal = buffer ? buffer[pxY * canvas.width + pxX] : 0;
+      const epIdx = currentEpoch;
+      const currentFrameObj = frames.find(f => f.epochIndex === epIdx && detectors[f.detector - 1]) || frames[0];
+      const validMask = currentFrameObj?.validMask;
+      const pixelIdx = pxY * canvas.width + pxX;
+      const isValid = !validMask || validMask[pixelIdx] === 1;
+      const fluxVal = buffer ? buffer[pixelIdx] : 0;
 
       spherexStore.setHoverCoords({
         x: pxX,
         y: pxY,
         ra: cel.ra,
         dec: cel.dec,
-        flux: parseFloat(fluxVal.toFixed(2)),
+        flux: isValid ? parseFloat(fluxVal.toFixed(3)) : NaN,
       });
     }
 
@@ -376,12 +403,18 @@ export function FrameViewer() {
 
   const catalogMarkers = getCatalogMarkers(spherexStore.getState() as unknown as import('../lib/types').FramesResponse);
 
-  // Dynamic Scale Bar calculations (1 arcminute)
-  const arcminBarLength = 1.0;
-  const scaleBarPixelWidth = (arcminBarLength / 60.0) / Math.abs(wcs.cdelt);
+  const isRealData = Boolean(
+    provenance?.data_origin === 'observed_spherex' ||
+    (frames && frames.length > 0 && (
+      frames[0].provenance?.data_origin === 'observed_spherex' ||
+      (typeof frames[0].provenance?.collection === 'string' && frames[0].provenance.collection.includes('spherex'))
+    ))
+  );
+  const frameSize = frames && frames[0] ? frames[0].width : 256;
+  const svgScale = frameSize / 256;
 
   const currentFrameObj = frames.find(f => f.epochIndex === currentEpoch && detectors[f.detector - 1]);
-  const currentTargetPos = currentFrameObj?.movingTargetPixel || trajectoryPoints[currentEpoch] || { x: 128, y: 128 };
+  const currentTargetPos = currentFrameObj?.movingTargetPixel || trajectoryPoints[currentEpoch] || { x: frameSize / 2, y: frameSize / 2 };
 
   return (
     <div 
@@ -390,16 +423,22 @@ export function FrameViewer() {
     >
       {/* Top Banner explaining current visualization mode */}
       <div className={`px-4 py-2 border-b flex items-center justify-between text-xs font-mono transition-colors ${
-        mode === 'diff' 
+        isRealData
+          ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+          : mode === 'diff' 
           ? 'bg-rose-950/40 border-rose-800/60 text-rose-300'
           : mode === 'stack'
           ? 'bg-purple-950/40 border-purple-800/60 text-purple-300'
           : 'bg-slate-900/90 border-slate-800 text-slate-300'
       }`}>
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+          <span className={`w-2 h-2 rounded-full ${isRealData ? 'bg-emerald-400' : 'bg-cyan-400'} animate-ping`} />
           <span className="font-bold">
-            {mode === 'diff'
+            {isRealData
+              ? mode === 'diff'
+                ? 'COMPARACIÓN DE ÉPOCAS REALES: Resta fotométrica directa entre observaciones SPHEREx QR3 de M101.'
+                : 'OBSERVACIÓN REAL SPHEREx: Región M101 a 1.49 µm (NASA SPHEREx Quick Release 3).'
+              : mode === 'diff'
               ? 'FILTRO DE DIFERENCIA: Las estrellas fijas desaparecen. Los pares azul/rojo indican movimiento.'
               : mode === 'stack'
               ? 'APILADO TOTAL: 4 épocas sumadas para revelar objetos infrarrojos ultra tenues.'
@@ -409,13 +448,17 @@ export function FrameViewer() {
 
         {/* Quick Mode Indicator */}
         <div className="flex items-center gap-2">
-          {mode === 'diff' && (
+          {isRealData ? (
+            <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-600/40 text-[11px]">
+              D2 · 30×30 px · 37.7d
+            </span>
+          ) : mode === 'diff' ? (
             <div className="flex items-center gap-2 text-[11px] bg-slate-950/70 px-2 py-0.5 rounded border border-rose-500/40 font-bold">
               <span className="text-cyan-400">🔵 Posición 2025</span>
               <span>➔</span>
               <span className="text-rose-400">🔴 Posición 2027</span>
             </div>
-          )}
+          ) : null}
           <span className="text-slate-500">FOV: {fov}&apos;</span>
         </div>
       </div>
@@ -435,7 +478,7 @@ export function FrameViewer() {
         <div className="absolute inset-0 bg-cosmic-grid opacity-25 pointer-events-none" />
 
         {/* Detective Mode Alert Banner */}
-        {showDetectiveBanner && (
+        {!isRealData && showDetectiveBanner && (
           <div className="absolute top-5 z-50 flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-500 text-white font-bold shadow-2xl shadow-emerald-500/40 animate-bounce">
             <span className="text-3xl">🎉</span>
             <div>
@@ -452,13 +495,34 @@ export function FrameViewer() {
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-md">
             <div className="w-14 h-14 border-4 border-cyan-500/20 border-t-cyan-400 rounded-full animate-spin mb-3 shadow-lg shadow-cyan-500/30" />
             <div className="text-sm font-mono text-cyan-300 tracking-wider">
-              Sintetizando recortes SPHEREx a 256x256...
+              {isRealData || target.name?.includes('M101') ? 'Cargando observaciones reales SPHEREx...' : 'Sintetizando recortes SPHEREx a 256x256...'}
             </div>
           </div>
         )}
 
+        {/* Error Overlay */}
+        {error && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-rose-950 border border-rose-500/60 flex items-center justify-center text-rose-400 text-xl mb-3 shadow-lg shadow-rose-500/20">
+              ⚠️
+            </div>
+            <div className="text-sm font-bold text-rose-300 mb-1">
+              Error al consultar datos SPHEREx
+            </div>
+            <div className="text-xs text-slate-300 max-w-md font-mono mb-4 px-3 py-2 rounded bg-slate-900 border border-slate-800">
+              {error}
+            </div>
+            <button
+              onClick={() => spherexStore.loadFrames()}
+              className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs font-mono transition-colors"
+            >
+              Reintentar Consulta
+            </button>
+          </div>
+        )}
+
         {/* Interactive Object Callout Card */}
-        {selectedObjectCallout && (
+        {!isRealData && selectedObjectCallout && (
           <div className="absolute top-4 left-4 z-30 p-3.5 rounded-2xl bg-slate-900/95 border border-pink-500/50 shadow-2xl backdrop-blur-md max-w-sm">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
               <span className="font-extrabold text-pink-400 text-xs flex items-center gap-1.5">
@@ -485,6 +549,14 @@ export function FrameViewer() {
           </div>
         )}
 
+        {/* Quality Mask Legend for Real Data */}
+        {isRealData && (
+          <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-slate-800 text-[10px] font-mono text-slate-300 backdrop-blur-sm pointer-events-none">
+            <span className="w-2.5 h-2.5 rounded bg-[#2b3d5b] border border-slate-600 inline-block"></span>
+            <span>Píxeles excluidos (máscara de calidad)</span>
+          </div>
+        )}
+
         {/* Canvas & SVG Overlay */}
         <div 
           className="relative cursor-crosshair transition-transform duration-75 my-auto"
@@ -493,20 +565,26 @@ export function FrameViewer() {
           }}
           onClick={handleClick}
         >
+          {isRealData && (
+            <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded bg-slate-950/80 border border-slate-700/80 text-[10px] font-mono text-cyan-300 pointer-events-none">
+              Norte ↑ / Este ← (WCS)
+            </div>
+          )}
+
           <canvas
             ref={canvasRef}
-            width={256}
-            height={256}
-            className="w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] rounded-xl shadow-2xl border-2 border-slate-800/90"
+            width={frameSize}
+            height={frameSize}
+            className="w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] rounded-xl shadow-2xl border-2 border-slate-800/90 [image-rendering:pixelated]"
           />
 
           {/* SVG Vector Overlays */}
           <svg
-            viewBox="0 0 256 256"
+            viewBox={`0 0 ${frameSize} ${frameSize}`}
             className="absolute inset-0 w-full h-full pointer-events-none"
           >
             {/* Multi-Exposure Ghosting Mode */}
-            {overlays.ghostingTrail && (
+            {!isRealData && overlays.ghostingTrail && (
               <g>
                 {trajectoryPoints.map((pt, idx) => {
                   const colors = ['#38bdf8', '#4ade80', '#facc15', '#ec4899'];
@@ -548,7 +626,7 @@ export function FrameViewer() {
             )}
 
             {/* Gaia DR3 & CatWISE Catalog Markers */}
-            {overlays.gaia && catalogMarkers.filter(m => m.catalog === 'Gaia DR3').map(marker => (
+            {!isRealData && overlays.gaia && catalogMarkers.filter(m => m.catalog === 'Gaia DR3').map(marker => (
               <g key={marker.id} className="text-cyan-400">
                 <circle cx={marker.pixelX} cy={marker.pixelY} r="7" fill="none" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2.5 1.5" />
                 <line x1={marker.pixelX - 9} y1={marker.pixelY} x2={marker.pixelX + 9} y2={marker.pixelY} stroke="currentColor" strokeWidth="0.8" />
@@ -559,7 +637,7 @@ export function FrameViewer() {
               </g>
             ))}
 
-            {overlays.wise && catalogMarkers.filter(m => m.catalog === 'CatWISE2020').map(marker => (
+            {!isRealData && overlays.wise && catalogMarkers.filter(m => m.catalog === 'CatWISE2020').map(marker => (
               <g key={marker.id} className="text-amber-400">
                 <circle cx={marker.pixelX} cy={marker.pixelY} r="6.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
                 <text x={marker.pixelX + 9} y={marker.pixelY + 8} fill="currentColor" fontSize="7.5" fontWeight="bold" fontFamily="monospace">
@@ -569,7 +647,7 @@ export function FrameViewer() {
             ))}
 
             {/* Trajectory vector */}
-            {(overlays.trajectory || detective) && trajectoryPoints.length > 1 && (
+            {!isRealData && (overlays.trajectory || detective) && trajectoryPoints.length > 1 && (
               <g>
                 <polyline
                   points={trajectoryPoints.map(p => `${p.x},${p.y}`).join(' ')}
@@ -618,7 +696,7 @@ export function FrameViewer() {
             )}
 
             {/* Didactic Annotations Layer */}
-            {overlays.annotations && (
+            {!isRealData && overlays.annotations && (
               <g>
                 {/* Highlight Target Object */}
                 <g className="text-pink-400">
@@ -643,25 +721,34 @@ export function FrameViewer() {
               </g>
             )}
 
+            {isRealData && overlays.annotations && (
+              <g className="text-cyan-400">
+                <circle cx={frameSize / 2} cy={frameSize / 2} r={10 * svgScale} fill="none" stroke="#38bdf8" strokeWidth={1.2 * svgScale} strokeDasharray={`${2 * svgScale} ${1.5 * svgScale}`} />
+                <text x={frameSize / 2 + 12 * svgScale} y={frameSize / 2 - 4 * svgScale} fill="#38bdf8" fontSize={7 * svgScale} fontWeight="bold" fontFamily="monospace">
+                  Centro WCS (M101)
+                </text>
+              </g>
+            )}
+
             {/* Crosshair */}
             {overlays.crosshair && (
-              <g className="text-slate-600/40">
-                <line x1="128" y1="0" x2="128" y2="256" stroke="currentColor" strokeWidth="0.5" strokeDasharray="4 4" />
-                <line x1="0" y1="128" x2="256" y2="128" stroke="currentColor" strokeWidth="0.5" strokeDasharray="4 4" />
-                <circle cx="128" cy="128" r="8" fill="none" stroke="currentColor" strokeWidth="0.6" />
+              <g className="text-slate-600/60">
+                <line x1={frameSize / 2} y1={0} x2={frameSize / 2} y2={frameSize} stroke="currentColor" strokeWidth={0.5 * svgScale} strokeDasharray={`${4 * svgScale} ${4 * svgScale}`} />
+                <line x1={0} y1={frameSize / 2} x2={frameSize} y2={frameSize / 2} stroke="currentColor" strokeWidth={0.5 * svgScale} strokeDasharray={`${4 * svgScale} ${4 * svgScale}`} />
+                <circle cx={frameSize / 2} cy={frameSize / 2} r={8 * svgScale} fill="none" stroke="currentColor" strokeWidth={0.6 * svgScale} />
               </g>
             )}
 
             {/* Selected Pixel */}
             {selectedPixel && (
               <g className="text-yellow-400">
-                <rect x={selectedPixel.x - 3} y={selectedPixel.y - 3} width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.2" />
-                <circle cx={selectedPixel.x} cy={selectedPixel.y} r="7" fill="none" stroke="currentColor" strokeWidth="0.8" strokeDasharray="2 2" className="animate-spin" />
+                <rect x={selectedPixel.x - 3 * svgScale} y={selectedPixel.y - 3 * svgScale} width={6 * svgScale} height={6 * svgScale} fill="none" stroke="currentColor" strokeWidth={1.2 * svgScale} />
+                <circle cx={selectedPixel.x} cy={selectedPixel.y} r={7 * svgScale} fill="none" stroke="currentColor" strokeWidth={0.8 * svgScale} strokeDasharray={`${2 * svgScale} ${2 * svgScale}`} className="animate-spin" />
               </g>
             )}
 
             {/* Detective Found Celebration Burst */}
-            {detectiveFound && (
+            {!isRealData && detectiveFound && (
               <g className="pointer-events-none">
                 {[0, 45, 90, 135, 180, 225, 270, 315].map((angle, idx) => {
                   const rad = (angle * Math.PI) / 180;
@@ -755,21 +842,23 @@ export function FrameViewer() {
               }`}
             >
               <span>⚡</span>
-              <span>{blinkMode ? 'Parpadeando (1 ↔ 4)' : 'Parpadeo 1 ↔ 4'}</span>
+              <span>{blinkMode ? `Parpadeando (1 ↔ ${epochs.length || 2})` : `Parpadeo 1 ↔ ${epochs.length || 2}`}</span>
             </button>
 
-            <button
-              onClick={() => spherexStore.toggleGhostingTrail()}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                overlays.ghostingTrail
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30'
-                  : 'bg-slate-800/90 hover:bg-slate-700 text-amber-300 border-amber-500/40'
-              }`}
-              title="Muestra las 4 posiciones del astro a la vez como en una exposición múltiple"
-            >
-              <span>✨</span>
-              <span>Rastro Multi-Época</span>
-            </button>
+            {!isRealData && (
+              <button
+                onClick={() => spherexStore.toggleGhostingTrail()}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                  overlays.ghostingTrail
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30'
+                    : 'bg-slate-800/90 hover:bg-slate-700 text-amber-300 border-amber-500/40'
+                }`}
+                title="Muestra las 4 posiciones del astro a la vez como en una exposición múltiple"
+              >
+                <span>✨</span>
+                <span>Rastro Multi-Época</span>
+              </button>
+            )}
           </div>
 
           {/* Speed Selector */}
@@ -791,8 +880,8 @@ export function FrameViewer() {
           </div>
         </div>
 
-        {/* 4 Epoch Steps Interactive Buttons */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+        {/* Epoch Steps Interactive Buttons */}
+        <div className={`grid gap-2 pt-1 ${epochs.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
           {epochs.map((ep, idx) => {
             const isSelected = idx === currentEpoch;
             return (
@@ -810,7 +899,7 @@ export function FrameViewer() {
                     Época {ep.epoch}
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    {idx === 0 ? 'Inicio' : `+${(idx * 0.5).toFixed(1)}a`}
+                    {idx === 0 ? 'Inicio' : isRealData ? '+37.7 días' : `+${(idx * 0.5).toFixed(1)}a`}
                   </span>
                 </div>
                 <div className="text-[11px] font-mono text-slate-300 mt-0.5">

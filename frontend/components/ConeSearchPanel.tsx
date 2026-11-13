@@ -60,8 +60,11 @@ export function ConeSearchPanel({
   // Sync initial values when current object changes or panel opens
   useEffect(() => {
     if (isOpen) {
-      setActiveCoords({ ra: currentRa, dec: currentDec });
-      setCenterInput(currentName);
+      const timer = setTimeout(() => {
+        setActiveCoords({ ra: currentRa, dec: currentDec });
+        setCenterInput(currentName);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [isOpen, currentRa, currentDec, currentName]);
 

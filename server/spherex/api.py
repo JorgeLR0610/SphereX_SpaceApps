@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from spherex import __version__
+from spherex import __version__, service
 from spherex.models import FramesResponseModel, HealthResponse
 from spherex.service import (
     DataUnavailableError,
@@ -16,9 +16,10 @@ from spherex.service import (
     M101_DEFAULT_FOV,
     M101_DETECTOR,
     M101_RA,
+    M101_SUPPORTED_FOV_MAX,
+    M101_SUPPORTED_FOV_MIN,
+    UnsupportedFovError,
     UnsupportedRegionError,
-    get_default_data_dir,
-    get_frames,
 )
 
 
@@ -62,6 +63,19 @@ async def handle_unsupported_region(_request: Request, exc: UnsupportedRegionErr
     )
 
 
+@app.exception_handler(UnsupportedFovError)
+async def handle_unsupported_fov(_request: Request, exc: UnsupportedFovError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": str(exc),
+            "error_type": "unsupported_fov",
+            "requested_fov": exc.fov,
+            "supported_fov_range": [M101_SUPPORTED_FOV_MIN, M101_SUPPORTED_FOV_MAX],
+        },
+    )
+
+
 @app.exception_handler(DataUnavailableError)
 async def handle_data_unavailable(_request: Request, exc: DataUnavailableError):
     return JSONResponse(
@@ -70,20 +84,21 @@ async def handle_data_unavailable(_request: Request, exc: DataUnavailableError):
             "detail": str(exc),
             "error_type": "data_unavailable",
             "path": str(exc.path),
+            "reason": exc.reason,
         },
     )
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Return health status and whether M101 cached products are ready."""
-    data_dir = get_default_data_dir()
-    cached = (data_dir / "aligned.fits").exists() and (data_dir / "manifest.json").exists()
+    """Return health status and whether M101 cached products are verified usable."""
+    data_dir = service.get_default_data_dir()
+    is_usable, _ = service.verify_dataset_usability(data_dir)
     return HealthResponse(
         status="ok",
         service="spherex-scientific-api",
         version=__version__,
-        m101_cached=cached,
+        m101_cached=is_usable,
         data_dir=str(data_dir),
     )
 
@@ -96,7 +111,7 @@ async def get_frames_endpoint(
     targetName: Optional[str] = Query(None, description="Optional target or preset name"),
 ) -> FramesResponseModel:
     """Retrieve WCS-aligned SPHEREx observation frames and validity masks."""
-    return get_frames(
+    return service.get_frames(
         ra=ra,
         dec=dec,
         fov_arcmin=fov,

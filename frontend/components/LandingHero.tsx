@@ -17,6 +17,7 @@ interface LandingHeroProps {
   onSelect: (key: string) => void;
   onSearch: (query: string) => void;
   onOpenConeSearch?: () => void;
+  onOpenObservatory?: () => void;
   isSearching: boolean;
   searchMessage: string;
 }
@@ -26,6 +27,7 @@ export function LandingHero({
   onSelect,
   onSearch,
   onOpenConeSearch,
+  onOpenObservatory,
   isSearching,
   searchMessage,
 }: LandingHeroProps) {
@@ -120,9 +122,20 @@ export function LandingHero({
       {/* Main Hero Header */}
       <div className="relative z-10 max-w-4xl w-full text-center flex flex-col items-center">
         {/* Subtitle Badge */}
-        <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-semibold bg-[#141733]/90 border border-[#272a4f] text-[#ff5a7e] mb-4 shadow-lg backdrop-blur-md">
-          <span className="w-2 h-2 rounded-full bg-[#ff5a7e] animate-ping" />
-          <span>Telescopio Espacial SPHEREx (NASA)</span>
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-semibold bg-[#141733]/90 border border-[#272a4f] text-[#ff5a7e] shadow-lg backdrop-blur-md">
+            <span className="w-2 h-2 rounded-full bg-[#ff5a7e] animate-ping" />
+            <span>Telescopio Espacial SPHEREx (NASA)</span>
+          </div>
+          {onOpenObservatory && (
+            <button
+              onClick={onOpenObservatory}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 shadow-lg cursor-pointer transition-all"
+            >
+              <span>🔭</span>
+              <span>Abrir Observatorio SPHEREx</span>
+            </button>
+          )}
         </div>
 
         {/* Headline */}

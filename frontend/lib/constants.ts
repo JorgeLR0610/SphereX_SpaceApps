@@ -47,6 +47,31 @@ export interface PresetTarget extends Target {
 
 export const PRESET_TARGETS: PresetTarget[] = [
   {
+    id: 'm101',
+    name: 'M101 (Galaxia del Molinete)',
+    ra: 210.80227,
+    dec: 54.34895,
+    category: 'Standard',
+    tagline: 'Datos reales SPHEREx QR3 (Detector 2, ~1.49 µm)',
+    whyUnique: 'Par de observaciones reales de SPHEREx (Quick Release 3) alineadas mediante WCS estricto con una separación temporal de 37.68 días.',
+    description: 'Región de la galaxia M101 observada por la misión SPHEREx de la NASA en mayo y junio de 2026. Permite comparar dos épocas reales a 1.49 µm con WCS idéntico y máscara de calidad de píxeles.',
+    detectiveMission: {
+      name: 'M101 (SPHEREx Real QR3)',
+      category: 'Región Extragaláctica / Calibración',
+      expectedPmRaMasYr: 0.0,
+      expectedPmDecMasYr: 0.0,
+      initialCoords: { ra: 210.80227, dec: 54.34895 },
+      initialPixel: [15, 15],
+      hints: [
+        'Observaciones reales de NASA SPHEREx en el Detector 2 (1.49 µm).',
+        'Los píxeles en azul pizarra indican zonas fuera de cobertura o con máscara de calidad.',
+        'La misión detecta fuentes astronómicas con precisión fotométrica y astrométrica.',
+      ],
+      description: 'Exploración de datos reales de SPHEREx QR3 en la región de M101.',
+      foundTolerancePixels: 15,
+    },
+  },
+  {
     id: 'wise0855',
     name: 'WISE 0855-0714',
     ra: 133.7951,

@@ -35,13 +35,23 @@ photometry and motion detection are **not** completed by this milestone.
 **M2 result:** Completed. Modular scientific package under `server/spherex/` implemented with FastAPI application (`spherex.api:app`). Endpoints `/health` and `GET /frames` return the two verified M101 observations (`2026W20_2A_0464_3` and `2026W26_1A_0500_1`, 37.68 days apart) on a 30×30 ICRS TAN grid. Returned arrays have correct orientation matching `frontend/lib/wcs.ts` (row 0 = North), masked non-finite pixels are zeroed with an explicit binary `validMask` (769 valid pixels, 85.44%), and provenance is preserved. 44 automated tests pass in pytest (`test_api.py`, `test_modules.py`, and `test_data_validation.py`). Ready for M3 frontend integration.
 
 ## M3 — Connect Next.js
-- [ ] Add a documented reverse proxy/rewrite or configurable API URL for `/api/*`. Prefer relative same-origin calls to avoid CORS surprises.
-- [ ] Make `RealSpherexAPI` deserialize numeric `pixelData` into `Float32Array` (or agree on a binary alternative explicitly).
-- [ ] Verify loading/error/empty states; never fall back to synthetic frames without an explicit visible choice.
-- [ ] Handle variable actual number of epochs/bands (not fixed four epochs x six detectors).
-- [ ] Run Next.js lint/build and test browser with real backend. Inspect image orientation/scale and blink results.
+- [x] Add a documented reverse proxy/rewrite or configurable API URL for `/api/*`. Prefer relative same-origin calls to avoid CORS surprises.
+- [x] Make `RealSpherexAPI` deserialize numeric `pixelData` into `Float32Array` (or agree on a binary alternative explicitly).
+- [x] Verify loading/error/empty states; never fall back to synthetic frames without an explicit visible choice.
+- [x] Handle variable actual number of epochs/bands (not fixed four epochs x six detectors).
+- [x] Run Next.js lint/build and test browser with real backend. Inspect image orientation/scale and blink results.
 
 **Definition of done:** a user can select a proven sky region and compare real observations in the existing viewer, clearly labeled as real SPHEREx data.
+
+**M3 result:** Completed and verified.
+1. `next.config.ts` rewrite proxy forwards `/api/:path*` to `http://127.0.0.1:8000/:path*` seamlessly without CORS headers.
+2. `RealSpherexAPI` in `frontend/lib/apiAdapter.ts` converts numeric array `pixelData` into `Float32Array` in place.
+3. Supported dynamic epoch count (2 epochs for M101: `2026W20_2A_0464_3` and `2026W26_1A_0500_1`, separated by 37.68 days), dynamic blink mode (`1 ↔ 2`), and dynamic frame dimensions (30×30) with `[image-rendering:pixelated]`.
+4. Quality mask (`validMask === 0`) rendered in muted slate blue `#2b3d5b` (RGB 43, 61, 91), preventing misleading dark/zero flux.
+5. Inactive detectors (1, 3, 4, 5, 6) disabled and dimmed; only Detector 2 (1.49 µm) enabled.
+6. Authentic metadata displayed (dates, MJD, wavelengths, detector, and IRSA provenance); unmeasured detective missions disabled on real data; single-band Level 2 status and M5 spectral cube deferral clearly explained.
+7. Visual badge `🔭 DATOS REALES SPHEREx` dynamically distinguishes real observations from `🧪 MODO DEMO`.
+8. 47 backend tests pass (`cd server && uv run --locked pytest -v`); Next.js dev and production build succeed with 0 errors; headless Chromium E2E browser tests pass and screenshots captured in `docs/assets/m3-e2e-m101-observatory.png` and `docs/assets/m3-e2e-synthetic-mode.png`.
 
 ## M4 — Post-Integration: Catalog Overlays & Time-Domain Analysis
 *Based on official resource review in `docs/official-resources-review.md` (WiseView UX & Gaia DR3).*

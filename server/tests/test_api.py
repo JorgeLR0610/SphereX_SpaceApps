@@ -9,7 +9,7 @@ import pytest
 
 from spherex.api import app
 from spherex.models import FramesResponseModel
-from spherex.service import M101_DEC, M101_RA
+from spherex.service import M101_DEC, M101_RA, get_default_data_dir
 
 
 @pytest.fixture
@@ -28,7 +28,60 @@ def test_health_endpoint(client):
     assert "data_dir" in data
 
 
+def test_health_verifies_usability(client, tmp_path, monkeypatch):
+    import spherex.service as service
+    # 1. Empty directory -> not cached
+    monkeypatch.setattr(service, "get_default_data_dir", lambda: tmp_path)
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["m101_cached"] is False
+
+    # 2. Corrupt files -> not cached (usability check fails)
+    (tmp_path / "aligned.fits").write_text("corrupt_fits")
+    (tmp_path / "manifest.json").write_text("{}")
+    resp2 = client.get("/health")
+    assert resp2.status_code == 200
+    assert resp2.json()["m101_cached"] is False
+
+
+def test_isolated_synthetic_frames(client, synthetic_data_dir, monkeypatch):
+    """Test full frames retrieval flow using isolated synthetic dataset (zero download dependency)."""
+    import spherex.service as service
+    monkeypatch.setattr(service, "get_default_data_dir", lambda: synthetic_data_dir)
+
+    response = client.get(f"/frames?ra={M101_RA}&dec={M101_DEC}&fov=3.0")
+    assert response.status_code == 200
+    data = response.json()
+    model = FramesResponseModel.model_validate(data)
+
+    assert len(model.frames) == 2
+    assert model.frames[0].id == "SYNTH_A"
+    assert model.frames[0].flags == ["contaminated_edge"]
+    assert model.frames[0].pixelData[0] == 0.0
+    assert model.frames[0].validMask[0] == 0
+    assert model.frames[0].validMask[1] == 1
+
+
+def test_frames_unsupported_fov(client, synthetic_data_dir, monkeypatch):
+    """Verify that FOV requests not matching the fixed 3.0 arcmin dataset are rejected with HTTP 422."""
+    import spherex.service as service
+    monkeypatch.setattr(service, "get_default_data_dir", lambda: synthetic_data_dir)
+
+    # FOV 1.0 arcmin is below supported range [2.5, 3.5]
+    resp_small = client.get(f"/frames?ra={M101_RA}&dec={M101_DEC}&fov=1.0")
+    assert resp_small.status_code == 422
+    assert resp_small.json()["error_type"] == "unsupported_fov"
+    assert "3.0" in resp_small.json()["detail"]
+
+    # FOV 15.0 arcmin is above supported range
+    resp_large = client.get(f"/frames?ra={M101_RA}&dec={M101_DEC}&fov=15.0")
+    assert resp_large.status_code == 422
+    assert resp_large.json()["error_type"] == "unsupported_fov"
+
+
+@pytest.mark.dataset
 def test_frames_m101_valid_query(client):
+    """Integration test against the verified real M101 dataset."""
     url = f"/frames?ra={M101_RA}&dec={M101_DEC}&fov=3.0"
     response = client.get(url)
     assert response.status_code == 200
@@ -59,6 +112,7 @@ def test_frames_m101_valid_query(client):
     assert frame_b.id == "2026W26_1A_0500_1"
     assert frame_a.detector == 2
     assert frame_b.detector == 2
+    assert frame_a.flags == ["contaminated_edge"]
     assert frame_a.width == 30 and frame_a.height == 30
     assert frame_b.width == 30 and frame_b.height == 30
 
@@ -91,6 +145,7 @@ def test_frames_m101_valid_query(client):
     assert len(model.provenance["limitations"]) >= 4
 
 
+@pytest.mark.dataset
 def test_orientation_canvas_matching(client):
     """Verify that row 0 in pixelData corresponds to North (+Dec) for canvas compatibility."""
     url = f"/frames?ra={M101_RA}&dec={M101_DEC}&fov=3.0"
@@ -98,14 +153,9 @@ def test_orientation_canvas_matching(client):
     assert response.status_code == 200
     data = response.json()
 
-    # In our 30x30 grid with 6.1518 arcsec/pixel and crpix=(15, 15):
-    # North pixels have higher Dec and should map to screen y = 0
-    # South pixels have lower Dec and should map to screen y = 29
     frame = data["frames"][0]
-    pixel_data = np.array(frame["pixelData"]).reshape((30, 30))
     valid_mask = np.array(frame["validMask"]).reshape((30, 30))
 
-    # Test that valid_mask has expected common footprint geometry
     assert valid_mask.shape == (30, 30)
     assert np.count_nonzero(valid_mask) == 769
 
@@ -145,6 +195,7 @@ def test_frames_data_unavailable(client, tmp_path, monkeypatch):
     assert "spherex.prepare" in data["detail"]
 
 
+@pytest.mark.dataset
 def test_json_strict_serialization_no_nan(client):
     response = client.get(f"/frames?ra={M101_RA}&dec={M101_DEC}&fov=3.0")
     assert response.status_code == 200

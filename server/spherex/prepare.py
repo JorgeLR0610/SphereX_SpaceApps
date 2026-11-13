@@ -13,6 +13,7 @@ from spherex.service import (
     M101_DETECTOR,
     M101_RA,
     get_default_data_dir,
+    verify_dataset_usability,
 )
 import scripts.validate_irsa as validate_irsa
 
@@ -28,10 +29,14 @@ def prepare_m101(
     aligned_fits = output / "aligned.fits"
     manifest_path = output / "manifest.json"
 
-    if aligned_fits.exists() and manifest_path.exists() and not force:
-        print(f"[spherex.prepare] Verified cached M101 products already present in '{output}'.")
+    usable, reason = verify_dataset_usability(output)
+    if usable and not force:
+        print(f"[spherex.prepare] Verified cached M101 products confirmed usable in '{output}'.")
         print("[spherex.prepare] Use --force to re-run discovery and processing.")
         return 0
+
+    if not usable and (aligned_fits.exists() or manifest_path.exists()) and not force:
+        print(f"[spherex.prepare] Cached products present but failed usability verification: {reason}. Re-preparing...")
 
     print(f"[spherex.prepare] Preparing verified M101 dataset in '{output}' (offline={offline})...")
     output.mkdir(parents=True, exist_ok=True)

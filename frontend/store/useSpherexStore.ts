@@ -14,7 +14,7 @@ import {
   FramesResponse
 } from '../lib/types';
 import { PRESET_TARGETS } from '../lib/constants';
-import { api } from '../lib/apiAdapter';
+import { api, isRealApiActive } from '../lib/apiAdapter';
 import { sound } from '../lib/sound';
 
 export interface SelectedObjectCallout {
@@ -85,9 +85,15 @@ export interface SpherexState {
   error: string | null;
   isEmbed: boolean;
   isAudioMuted: boolean;
+  provenance?: Record<string, unknown>;
 }
 
-const defaultPreset = PRESET_TARGETS[0]; // WISE 0855
+const isRealApiDefault = process.env.NEXT_PUBLIC_USE_REAL_API === 'true';
+const defaultPreset = isRealApiDefault
+  ? (PRESET_TARGETS.find(p => p.id === 'm101') || PRESET_TARGETS[0])
+  : (PRESET_TARGETS.find(p => p.id === 'wise0855') || PRESET_TARGETS[0]);
+
+const isM101Default = defaultPreset.id === 'm101';
 
 const initialState: SpherexState = {
   target: {
@@ -99,23 +105,23 @@ const initialState: SpherexState = {
     category: defaultPreset.category,
     description: defaultPreset.description,
   },
-  fov: 5.0,
-  detectors: [true, true, true, true, true, true],
+  fov: isM101Default ? 3.0 : 5.0,
+  detectors: isM101Default ? [false, true, false, false, false, false] : [true, true, true, true, true, true],
   sumDetectors: false,
   mode: 'normal',
   diffRef: 'first',
   colormap: 'inferno',
   stretch: {
-    min: 0,
-    max: 140,
-    fn: 'asinh',
+    min: isM101Default ? 1.0 : 0,
+    max: isM101Default ? 2.5 : 140,
+    fn: isM101Default ? 'linear' : 'asinh',
   },
   overlays: {
     gaia: false, // Keep clean by default
     wise: false,
-    trajectory: true,
+    trajectory: !isM101Default,
     crosshair: false,
-    annotations: true,
+    annotations: !isM101Default,
     ghostingTrail: false,
   },
   blinkMode: false,
@@ -123,7 +129,7 @@ const initialState: SpherexState = {
   detectiveFound: false,
   detectiveScore: 0,
   detectiveTarget: defaultPreset.detectiveMission,
-  selectedObjectCallout: {
+  selectedObjectCallout: isM101Default ? null : {
     name: defaultPreset.name || 'WISE 0855',
     type: 'Sub-enana marrón ultra fría (Y4)',
     motion: '8.1" por año (~83 km/s)',
@@ -136,12 +142,12 @@ const initialState: SpherexState = {
   currentEpoch: 0,
   playing: false,
   fps: 3,
-  selectedPixel: { x: 128, y: 128 },
+  selectedPixel: isM101Default ? { x: 15, y: 15 } : { x: 128, y: 128 },
   wcs: {
-    crpix: [128, 128],
+    crpix: isM101Default ? [15, 15] : [128, 128],
     crval: [defaultPreset.ra, defaultPreset.dec],
-    cdelt: (5.0 / 60.0) / 256,
-    size: [256, 256],
+    cdelt: isM101Default ? 0.0017088 : (5.0 / 60.0) / 256,
+    size: isM101Default ? [30, 30] : [256, 256],
   },
   isLoading: false,
   error: null,
@@ -160,7 +166,12 @@ function emitChange() {
 // Bidirectional URL sync
 function syncUrl() {
   if (typeof window === 'undefined') return;
+  const currentParams = new URLSearchParams(window.location.search);
   const p = new URLSearchParams();
+  p.set('view', 'observatory');
+  if (currentParams.has('api')) {
+    p.set('api', currentParams.get('api')!);
+  }
   p.set('ra', state.target.ra.toFixed(4));
   p.set('dec', state.target.dec.toFixed(4));
   p.set('fov', state.fov.toString());
@@ -188,9 +199,20 @@ export const spherexStore = {
   initFromUrl: () => {
     if (typeof window === 'undefined') return;
     const p = new URLSearchParams(window.location.search);
-    const ra = p.get('ra') ? parseFloat(p.get('ra')!) : state.target.ra;
-    const dec = p.get('dec') ? parseFloat(p.get('dec')!) : state.target.dec;
-    const fov = p.get('fov') ? parseFloat(p.get('fov')!) : state.fov;
+    const activeIsReal = isRealApiActive();
+
+    let targetPreset = PRESET_TARGETS.find(pr => pr.id === p.get('target'));
+    if (!targetPreset && !p.has('ra')) {
+      targetPreset = activeIsReal
+        ? PRESET_TARGETS.find(pr => pr.id === 'm101')
+        : PRESET_TARGETS.find(pr => pr.id === 'wise0855');
+    }
+
+    const baseTarget = targetPreset || (activeIsReal ? (PRESET_TARGETS.find(pr => pr.id === 'm101') || state.target) : (PRESET_TARGETS.find(pr => pr.id === 'wise0855') || state.target));
+    const ra = p.get('ra') ? parseFloat(p.get('ra')!) : baseTarget.ra;
+    const dec = p.get('dec') ? parseFloat(p.get('dec')!) : baseTarget.dec;
+    const isM101 = activeIsReal && Math.abs(ra - 210.80227) < 0.01 && Math.abs(dec - 54.34895) < 0.01;
+    const fov = p.get('fov') ? parseFloat(p.get('fov')!) : (isM101 ? 3.0 : (targetPreset?.id === 'wise0855' ? 5.0 : state.fov));
     const mode = (p.get('mode') as DisplayMode) || state.mode;
     const detParam = p.get('det');
     const isEmbed = p.get('embed') === '1';
@@ -199,17 +221,32 @@ export const spherexStore = {
     let detectors = state.detectors;
     if (detParam && detParam.length === 6) {
       detectors = detParam.split('').map(c => c === '1');
+    } else if (isM101) {
+      detectors = [false, true, false, false, false, false];
+    } else if (!activeIsReal) {
+      detectors = [true, true, true, true, true, true];
     }
 
     state = {
       ...state,
-      target: { ...state.target, ra, dec },
+      target: {
+        ...state.target,
+        ra,
+        dec,
+        name: baseTarget.name || state.target.name,
+        pmRa: baseTarget.pmRa,
+        pmDec: baseTarget.pmDec,
+        category: baseTarget.category,
+        description: baseTarget.description,
+      },
       fov: isNaN(fov) ? 5.0 : Math.min(30, Math.max(1, fov)),
       mode: ['normal', 'diff', 'stack'].includes(mode) ? mode : 'normal',
       detectors,
       sumDetectors: p.get('sum') === '1',
       isEmbed,
       detective,
+      selectedPixel: isM101 ? { x: 15, y: 15 } : state.selectedPixel,
+      selectedObjectCallout: isM101 ? null : state.selectedObjectCallout,
       overlays: {
         ...state.overlays,
         gaia: p.get('gaia') === '1',
@@ -221,13 +258,16 @@ export const spherexStore = {
   },
 
   setTarget: async (target: Partial<Target>) => {
-    const preset = PRESET_TARGETS.find(p => p.name === target.name);
+    const preset = PRESET_TARGETS.find(p => p.name === target.name || p.id === (target as { id?: string }).id);
+    const targetFov = preset?.id === 'm101' ? 3.0 : (preset ? 5.0 : state.fov);
+    const isM101 = preset?.id === 'm101';
     state = {
       ...state,
       target: { ...state.target, ...target },
+      fov: targetFov,
       detectiveFound: false,
-      selectedPixel: { x: 128, y: 128 },
-      selectedObjectCallout: {
+      selectedPixel: isM101 ? { x: 15, y: 15 } : { x: 128, y: 128 },
+      selectedObjectCallout: isM101 ? null : {
         name: target.name || 'Objetivo',
         type: target.category || 'Astro Infrarrojo',
         motion: `${Math.hypot(target.pmRa || 0, target.pmDec || 0).toFixed(0)} mas/año`,
@@ -305,6 +345,7 @@ export const spherexStore = {
       ...state,
       blinkMode: nextBlink,
       playing: false,
+      currentEpoch: nextBlink ? 0 : state.currentEpoch,
     };
     sound.playBlip(nextBlink ? 880 : 440);
     emitChange();
@@ -437,19 +478,62 @@ export const spherexStore = {
         targetName: state.target.name,
       });
 
+      // Detect if real observed SPHEREx data was returned
+      const isRealData = response.frames.length > 0 && (
+        response.provenance?.data_origin === 'observed_spherex' ||
+        response.frames[0]?.provenance?.data_origin === 'observed_spherex' ||
+        (typeof response.frames[0]?.provenance?.collection === 'string' &&
+          response.frames[0]?.provenance?.collection.includes('spherex'))
+      );
+
+      // Adapt detectors if real data is served
+      let nextDetectors = state.detectors;
+      if (isRealData) {
+        const presentDetectors = new Set(response.frames.map(f => f.detector));
+        nextDetectors = [1, 2, 3, 4, 5, 6].map(d => presentDetectors.has(d));
+      }
+
+      // Bound currentEpoch to actual returned epochs (e.g. 2 for M101 instead of 4)
+      const maxEpochIndex = Math.max(0, response.epochs.length - 1);
+      const boundedEpoch = Math.min(state.currentEpoch, maxEpochIndex);
+
+      // Compute dynamic stretch bounds based on real stats
+      let dynamicMin = 0;
+      let dynamicMax = 160;
+      if (response.frames.length > 0) {
+        let globalMin = Infinity;
+        let globalMax = -Infinity;
+        for (const f of response.frames) {
+          if (f.stats) {
+            if (isFinite(f.stats.min) && f.stats.min < globalMin) globalMin = f.stats.min;
+            if (isFinite(f.stats.max) && f.stats.max > globalMax) globalMax = f.stats.max;
+          }
+        }
+        if (globalMin < globalMax && isFinite(globalMin) && isFinite(globalMax)) {
+          dynamicMin = Math.max(0, Math.floor(globalMin * 0.95 * 100) / 100);
+          dynamicMax = Math.ceil(globalMax * 1.05 * 100) / 100;
+        }
+      }
+
       state = {
         ...state,
         frames: response.frames,
         epochs: response.epochs,
         wcs: response.wcs,
+        provenance: response.provenance,
         detectiveTarget: response.detectiveTarget,
+        detective: isRealData ? false : state.detective,
+        detectiveFound: isRealData ? false : state.detectiveFound,
+        detectors: nextDetectors,
+        currentEpoch: boundedEpoch,
+        stretch: {
+          ...state.stretch,
+          min: dynamicMin,
+          max: dynamicMax,
+          fn: isRealData ? 'linear' : state.stretch.fn,
+        },
         isLoading: false,
       };
-
-      if (response.frames.length > 0) {
-        state.stretch.min = 0;
-        state.stretch.max = 160;
-      }
 
       emitChange();
 

@@ -6,15 +6,12 @@ import { SPHEREX_DETECTORS } from '../lib/constants';
 import { DisplayMode, StretchFunction, ColormapType, DiffReference } from '../lib/types';
 import { 
   LayersIcon, 
-  SparklesIcon, 
-  CrosshairIcon, 
-  EyeIcon, 
-  InfoIcon, 
-  ActivityIcon 
+  CrosshairIcon 
 } from './Icons';
 
 export function ControlPanel() {
   const {
+    frames,
     fov,
     detectors,
     sumDetectors,
@@ -25,9 +22,18 @@ export function ControlPanel() {
     overlays,
     detective,
     detectiveFound,
-    detectiveScore,
     detectiveTarget,
+    provenance,
   } = useSpherexStore();
+
+  const isRealData = Boolean(
+    provenance?.data_origin === 'observed_spherex' ||
+    (frames && frames.length > 0 && (
+      frames[0].provenance?.data_origin === 'observed_spherex' ||
+      (typeof frames[0].provenance?.collection === 'string' && frames[0].provenance.collection.includes('spherex'))
+    ))
+  );
+  const presentDetectors = new Set(frames?.map(f => f.detector));
 
   return (
     <div className="w-full lg:w-80 flex flex-col gap-4 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-xl p-4 overflow-y-auto">
@@ -85,18 +91,24 @@ export function ControlPanel() {
         <div className="grid grid-cols-3 gap-1.5">
           {SPHEREX_DETECTORS.map((det, idx) => {
             const isActive = detectors[idx];
+            const isAvailable = presentDetectors.size === 0 || presentDetectors.has(det.id);
             return (
               <button
                 key={det.id}
-                onClick={() => spherexStore.toggleDetector(det.id)}
+                disabled={!isAvailable}
+                onClick={() => isAvailable && spherexStore.toggleDetector(det.id)}
                 style={{
-                  borderColor: isActive ? det.color : 'rgba(51, 65, 85, 0.5)',
-                  backgroundColor: isActive ? det.hexBg : 'rgba(15, 23, 42, 0.6)',
+                  borderColor: !isAvailable ? 'rgba(51, 65, 85, 0.3)' : isActive ? det.color : 'rgba(51, 65, 85, 0.5)',
+                  backgroundColor: !isAvailable ? 'rgba(15, 23, 42, 0.3)' : isActive ? det.hexBg : 'rgba(15, 23, 42, 0.6)',
                 }}
                 className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-lg border text-center transition-all ${
-                  isActive ? 'shadow-sm' : 'opacity-50 hover:opacity-80'
+                  !isAvailable
+                    ? 'opacity-30 cursor-not-allowed'
+                    : isActive
+                    ? 'shadow-sm'
+                    : 'opacity-50 hover:opacity-80'
                 }`}
-                title={`${det.name}: ${det.range} (${det.desc})`}
+                title={!isAvailable ? `Detector ${det.id} no disponible en esta observación` : `${det.name}: ${det.range} (${det.desc})`}
               >
                 <div className="flex items-center gap-1">
                   <div
@@ -290,7 +302,9 @@ export function ControlPanel() {
 
       {/* 7. El Gancho: Modo Detective 🕵️ */}
       <div className={`p-3 rounded-xl border transition-all ${
-        detective 
+        isRealData
+          ? 'bg-slate-950/40 border-slate-800 text-slate-500'
+          : detective 
           ? 'bg-gradient-to-b from-pink-950/40 to-slate-900 border-pink-500/50 shadow-lg shadow-pink-500/10' 
           : 'bg-slate-950/40 border-slate-800/80 hover:border-slate-700'
       }`}>
@@ -299,22 +313,31 @@ export function ControlPanel() {
             <span className="text-lg">🕵️</span>
             <div>
               <div className="text-xs font-bold text-slate-100">Modo Detective</div>
-              <div className="text-[10px] text-slate-400">Juego educativo de detección</div>
+              <div className="text-[10px] text-slate-400">
+                {isRealData ? 'Desactivado en datos reales' : 'Juego educativo de detección'}
+              </div>
             </div>
           </div>
           <button
-            onClick={() => spherexStore.setDetective(!detective)}
+            disabled={isRealData}
+            onClick={() => !isRealData && spherexStore.setDetective(!detective)}
             className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-              detective
+              isRealData
+                ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed border border-slate-800'
+                : detective
                 ? 'bg-pink-500 text-white shadow-md shadow-pink-500/30'
                 : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
             }`}
           >
-            {detective ? 'Activado' : 'Activar'}
+            {isRealData ? 'N/A' : detective ? 'Activado' : 'Activar'}
           </button>
         </div>
 
-        {detective && detectiveTarget && (
+        {isRealData ? (
+          <p className="text-[11px] text-slate-400 italic pt-1 border-t border-slate-800">
+            El modo interactivo detective está diseñado para objetivos con movimiento orbital simulado. El campo M101 contiene estrellas y estructura galáctica estática.
+          </p>
+        ) : detective && detectiveTarget ? (
           <div className="flex flex-col gap-2 pt-2 border-t border-pink-900/40 text-xs">
             <div className="text-slate-300 leading-snug">
               <span className="text-pink-400 font-semibold">Misión: </span>
@@ -345,7 +368,7 @@ export function ControlPanel() {
               )}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

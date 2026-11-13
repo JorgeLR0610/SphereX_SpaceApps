@@ -9,6 +9,17 @@ import { MapModal } from '../components/MapModal';
 import { RetoModal } from '../components/RetoModal';
 import { GuidedTour } from '../components/GuidedTour';
 import { ConeSearchPanel } from '../components/ConeSearchPanel';
+import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
+import { Header } from '../components/Header';
+import { ConceptHero } from '../components/ConceptHero';
+import { TargetExplainer } from '../components/TargetExplainer';
+import { FrameViewer } from '../components/FrameViewer';
+import { ControlPanel } from '../components/ControlPanel';
+import { SpectrumPanel } from '../components/SpectrumPanel';
+import { SkyContext } from '../components/SkyContext';
+import { MetadataPanel } from '../components/MetadataPanel';
+import { EmbedModal } from '../components/EmbedModal';
+import { KeyboardHelpModal } from '../components/KeyboardHelpModal';
 import {
   ConeResult,
   ConeFilterType,
@@ -136,8 +147,13 @@ function rng(seed: number) {
 }
 
 export default function Home() {
-  // Navigation: 'landing' (Momento 1) vs 'viewer' (Momento 2 & 3)
-  const [view, setView] = useState<'landing' | 'viewer'>('landing');
+  // Navigation: 'observatory' (Momento 2 & 3 Científico) vs 'landing' (Momento 1) vs 'viewer' (Versión Simplificada)
+  const [view, setView] = useState<'observatory' | 'landing' | 'viewer'>('observatory');
+
+  // Observatory Modals
+  const { isEmbed } = useSpherexStore();
+  const [isEmbedOpen, setIsEmbedOpen] = useState<boolean>(false);
+  const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
 
   // Object State
   const [key, setKey] = useState<string>('wise');
@@ -170,6 +186,49 @@ export default function Home() {
   const starsRef = useRef<{ x: number; y: number; b: number }[]>([]);
   const lastTsRef = useRef<number>(0);
 
+  // Initialize store from URL query parameters on mount
+  useEffect(() => {
+    spherexStore.initFromUrl();
+  }, []);
+
+  // Global Keyboard Shortcuts for Observatory
+  useEffect(() => {
+    if (view !== 'observatory') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        spherexStore.setPlaying(!spherexStore.getState().playing);
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        spherexStore.nextEpoch();
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        spherexStore.prevEpoch();
+      } else if (e.key === 'd' || e.key === 'D') {
+        const curr = spherexStore.getState().mode;
+        spherexStore.setMode(curr === 'diff' ? 'normal' : 'diff');
+      } else if (e.key === 's' || e.key === 'S') {
+        const curr = spherexStore.getState().mode;
+        spherexStore.setMode(curr === 'stack' ? 'normal' : 'stack');
+      } else if (e.key === 'm' || e.key === 'M') {
+        spherexStore.setDetective(!spherexStore.getState().detective);
+      } else if (['1', '2', '3', '4', '5', '6'].includes(e.key)) {
+        spherexStore.toggleDetector(parseInt(e.key, 10));
+      } else if (e.key === 'b' || e.key === 'B') {
+        spherexStore.toggleBlinkMode();
+      } else if (e.key === '?') {
+        setIsHelpOpen((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view]);
+
   // Load target by key
   const loadTarget = useCallback((k: string) => {
     const o = OBJ[k] || OBJ.wise;
@@ -193,79 +252,91 @@ export default function Home() {
   }, []);
 
   // Check URL parameters and hash on load
-  // Supports:
-  // - Hash: #wise, #barnard, etc.
-  // - Cone search params: ?ra=133.795&dec=-7.245&r=10&f=rapidos
   useEffect(() => {
-    const hash = window.location.hash.slice(1);
-    const search = new URLSearchParams(window.location.search);
-    const raParam = search.get('ra');
-    const decParam = search.get('dec');
-    const rParam = search.get('r');
-    const fParam = search.get('f');
+    const timer = setTimeout(() => {
+      const hash = window.location.hash.slice(1);
+      const search = new URLSearchParams(window.location.search);
+      const viewParam = search.get('view');
 
-    if (raParam && decParam) {
-      const raVal = parseFloat(raParam);
-      const decVal = parseFloat(decParam);
-      const radVal = parseFloat(rParam || '10') || 10;
-
-      if (!isNaN(raVal) && !isNaN(decVal)) {
-        setConeRadius(radVal);
-        if (fParam) {
-          if (fParam === 'rapidos' || fParam === 'fast') setConeFilters(['fast']);
-          else if (fParam === 'enanas' || fParam === 'browndwarf') setConeFilters(['browndwarf']);
-          else if (fParam === 'variables' || fParam === 'variable') setConeFilters(['variable']);
-          else setConeFilters(['all']);
-        }
-
-        // Check if matches known preset
-        const matchedPresetKey = Object.keys(OBJ).find(
-          (k) => Math.hypot(OBJ[k].ra - raVal, OBJ[k].dec - decVal) < 0.05
-        );
-
-        if (matchedPresetKey) {
-          loadTarget(matchedPresetKey);
-        } else {
-          const customObj: AstronomicalObject = {
-            id: `custom_${raVal.toFixed(3)}_${decVal.toFixed(3)}`,
-            n: `Centro (${raVal.toFixed(3)}°, ${decVal.toFixed(3)}°)`,
-            tag: 'Coordenadas seleccionadas para exploración por radio',
-            hook: 'Vecindario celeste consultado con SPHEREx y catálogos estelares.',
-            type: 'mov',
-            icon: '🔭',
-            badge: 'Área explorada',
-            pm: [-0.4, 0.3],
-            f: [
-              ['RA', `${raVal.toFixed(3)}°`],
-              ['Dec', `${decVal.toFixed(3)}°`],
-              ['Radio', `${radVal}′`],
-            ],
-            peak: 0.5,
-            ra: raVal,
-            dec: decVal,
-            fitsId: `SPHX_CONE_${raVal.toFixed(2)}_${decVal.toFixed(2)}`,
-            mjd: 60841.5,
-          };
-          setTarget(customObj);
-          setKey(customObj.id);
-        }
-
-        setView('viewer');
-        setIsConeSearchOpen(true);
+      if (viewParam === 'observatory' || hash === 'observatorio') {
+        setView('observatory');
         return;
       }
-    }
 
-    if (hash && OBJ[hash]) {
-      loadTarget(hash);
-      setView('viewer');
-    } else if (search.has('target') || search.has('q')) {
-      const q = search.get('target') || search.get('q') || '';
-      if (q && OBJ[q]) {
-        loadTarget(q);
+      if (viewParam === 'landing' || hash === 'portada') {
+        setView('landing');
+        return;
       }
-      setView('viewer');
-    }
+
+      const raParam = search.get('ra');
+      const decParam = search.get('dec');
+      const rParam = search.get('r');
+      const fParam = search.get('f');
+
+      if ((rParam && raParam && decParam) || (viewParam === 'viewer' && raParam && decParam)) {
+        const raVal = parseFloat(raParam);
+        const decVal = parseFloat(decParam);
+        const radVal = parseFloat(rParam || '10') || 10;
+
+        if (!isNaN(raVal) && !isNaN(decVal)) {
+          setConeRadius(radVal);
+          if (fParam) {
+            if (fParam === 'rapidos' || fParam === 'fast') setConeFilters(['fast']);
+            else if (fParam === 'enanas' || fParam === 'browndwarf') setConeFilters(['browndwarf']);
+            else if (fParam === 'variables' || fParam === 'variable') setConeFilters(['variable']);
+            else setConeFilters(['all']);
+          }
+
+          // Check if matches known preset
+          const matchedPresetKey = Object.keys(OBJ).find(
+            (k) => Math.hypot(OBJ[k].ra - raVal, OBJ[k].dec - decVal) < 0.05
+          );
+
+          if (matchedPresetKey) {
+            loadTarget(matchedPresetKey);
+          } else {
+            const customObj: AstronomicalObject = {
+              id: `custom_${raVal.toFixed(3)}_${decVal.toFixed(3)}`,
+              n: `Centro (${raVal.toFixed(3)}°, ${decVal.toFixed(3)}°)`,
+              tag: 'Coordenadas seleccionadas para exploración por radio',
+              hook: 'Vecindario celeste consultado con SPHEREx y catálogos estelares.',
+              type: 'mov',
+              icon: '🔭',
+              badge: 'Área explorada',
+              pm: [-0.4, 0.3],
+              f: [
+                ['RA', `${raVal.toFixed(3)}°`],
+                ['Dec', `${decVal.toFixed(3)}°`],
+                ['Radio', `${radVal}′`],
+              ],
+              peak: 0.5,
+              ra: raVal,
+              dec: decVal,
+              fitsId: `SPHX_CONE_${raVal.toFixed(2)}_${decVal.toFixed(2)}`,
+              mjd: 60841.5,
+            };
+            setTarget(customObj);
+            setKey(customObj.id);
+          }
+
+          setView('viewer');
+          setIsConeSearchOpen(true);
+          return;
+        }
+      }
+
+      if (hash && OBJ[hash]) {
+        loadTarget(hash);
+        setView('viewer');
+      } else if (search.has('target') || search.has('q')) {
+        const q = search.get('target') || search.get('q') || '';
+        if (q && OBJ[q]) {
+          loadTarget(q);
+        }
+        setView('viewer');
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadTarget]);
 
   // Transition from landing to viewer with auto-guided tour on first visit
@@ -730,6 +801,78 @@ export default function Home() {
   const currEpochIdx = Math.round(time);
   const { raStr, decStr } = formatSexagesimal(target.ra, target.dec);
 
+  // Standalone Embed Mode
+  if (isEmbed) {
+    return (
+      <main className="w-screen h-screen flex flex-col bg-slate-950 p-2 overflow-hidden">
+        <div className="flex-1 flex flex-col relative">
+          <FrameViewer />
+        </div>
+      </main>
+    );
+  }
+
+  // Full Scientific Observatory (SPHEREx Real Data & Advanced Simulation)
+  if (view === 'observatory') {
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+        <Header
+          onOpenEmbed={() => setIsEmbedOpen(true)}
+          onOpenHelp={() => setIsHelpOpen(true)}
+          onSwitchView={() => setView('landing')}
+        />
+
+        <main className="flex-1 flex flex-col gap-4 p-4 max-w-[1600px] w-full mx-auto">
+          <section>
+            <ConceptHero />
+          </section>
+
+          <section>
+            <TargetExplainer />
+          </section>
+
+          <section className="flex flex-col lg:flex-row gap-4 min-h-[500px]">
+            <FrameViewer />
+            <ControlPanel />
+          </section>
+
+          <section id="spectrum-section" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <SkyContext />
+            <SpectrumPanel />
+          </section>
+
+          <section>
+            <MetadataPanel />
+          </section>
+        </main>
+
+        <footer className="w-full py-4 px-6 border-t border-slate-900 bg-slate-950/60 text-center text-xs text-slate-500 font-mono flex flex-wrap items-center justify-between gap-3">
+          <div>
+            SPHEREx Time Machine · Diseñado para la misión NASA SPHEREx (Caltech / JPL / IPAC)
+          </div>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span>Datos: NASA IPAC IRSA SPHEREx QR3 & Simulación</span>
+            <button
+              onClick={() => setView('landing')}
+              className="hover:text-cyan-400 underline underline-offset-2"
+            >
+              Portada Educativa
+            </button>
+            <button
+              onClick={() => setIsHelpOpen(true)}
+              className="hover:text-cyan-400 underline underline-offset-2"
+            >
+              Guía de atajos (?)
+            </button>
+          </div>
+        </footer>
+
+        <EmbedModal isOpen={isEmbedOpen} onClose={() => setIsEmbedOpen(false)} />
+        <KeyboardHelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0d1c] text-[#f1eefb]">
       {/* ============================================================== */}
@@ -744,6 +887,7 @@ export default function Home() {
             setView('viewer');
             setIsConeSearchOpen(true);
           }}
+          onOpenObservatory={() => setView('observatory')}
           isSearching={isSearching}
           searchMessage={searchMessage}
         />
@@ -755,6 +899,14 @@ export default function Home() {
           {/* Header Bar */}
           <header className="flex flex-wrap gap-2.5 sm:gap-4 items-center justify-between px-4 sm:px-8 py-3.5 border-b border-[#272a4f] bg-[#0b0d1c]/90 backdrop-blur-md sticky top-0 z-30">
             <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => setView('observatory')}
+                title="Abrir observatorio científico completo con datos reales de SPHEREx"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-xs font-bold text-cyan-300 transition-all cursor-pointer shadow-sm"
+              >
+                <span>🔭</span>
+                <span>Observatorio SPHEREx</span>
+              </button>
               <button
                 onClick={() => {
                   setView('landing');

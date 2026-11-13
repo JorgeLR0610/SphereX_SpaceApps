@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useId } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useId } from 'react';
 
 interface GuidedTourProps {
   isOpen: boolean;
@@ -28,7 +28,7 @@ export function GuidedTour({
   const titleId = useId();
   const descId = useId();
 
-  const STEPS: StepInfo[] = [
+  const STEPS: StepInfo[] = useMemo(() => [
     {
       title: 'Estas son las estrellas. Casi no cambian.',
       badge: 'Paso 1 de 3: El fondo estelar',
@@ -54,7 +54,7 @@ export function GuidedTour({
       targetId: 'tour-highlight-switch',
       position: 'switch',
     },
-  ];
+  ], [isVariable, targetName]);
 
   // Update target bounding box for smooth positioning
   const updateTargetRect = useCallback(() => {
@@ -70,15 +70,26 @@ export function GuidedTour({
 
   useEffect(() => {
     if (isOpen) {
-      updateTargetRect();
+      const timer = setTimeout(updateTargetRect, 0);
       window.addEventListener('resize', updateTargetRect);
       window.addEventListener('scroll', updateTargetRect);
       return () => {
+        clearTimeout(timer);
         window.removeEventListener('resize', updateTargetRect);
         window.removeEventListener('scroll', updateTargetRect);
       };
     }
   }, [isOpen, updateTargetRect]);
+
+  const handleFinish = useCallback(() => {
+    try {
+      localStorage.setItem('spherex_tour_seen', 'true');
+    } catch {
+      // Storage access might be restricted in some iframe contexts
+    }
+    setStep(0);
+    onClose();
+  }, [onClose]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -98,21 +109,11 @@ export function GuidedTour({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, step, STEPS.length]);
+  }, [isOpen, step, handleFinish, STEPS.length]);
 
   if (!isOpen) return null;
 
   const current = STEPS[step];
-
-  const handleFinish = () => {
-    try {
-      localStorage.setItem('spherex_tour_seen', 'true');
-    } catch {
-      // Storage access might be restricted in some iframe contexts
-    }
-    setStep(0);
-    onClose();
-  };
 
   const handleNext = () => {
     if (step < STEPS.length - 1) {

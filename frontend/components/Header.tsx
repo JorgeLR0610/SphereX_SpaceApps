@@ -18,10 +18,19 @@ import {
 interface HeaderProps {
   onOpenEmbed: () => void;
   onOpenHelp: () => void;
+  onSwitchView?: () => void;
 }
 
-export function Header({ onOpenEmbed, onOpenHelp }: HeaderProps) {
-  const { target, isAudioMuted, detectiveScore } = useSpherexStore();
+export function Header({ onOpenEmbed, onOpenHelp, onSwitchView }: HeaderProps) {
+  const { target, isAudioMuted, detectiveScore, frames, provenance } = useSpherexStore();
+
+  const isRealData = Boolean(
+    provenance?.data_origin === 'observed_spherex' ||
+    (frames && frames.length > 0 && (
+      frames[0].provenance?.data_origin === 'observed_spherex' ||
+      (typeof frames[0].provenance?.collection === 'string' && frames[0].provenance.collection.includes('spherex'))
+    ))
+  );
 
   const [queryInput, setQueryInput] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -73,6 +82,15 @@ export function Header({ onOpenEmbed, onOpenHelp }: HeaderProps) {
             <h1 className="text-base font-extrabold tracking-tight text-white">
               SPHEREx <span className="text-cyan-400">Time Machine</span>
             </h1>
+            {isRealData ? (
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-sm shadow-emerald-500/20">
+                🔭 DATOS REALES SPHEREx
+              </span>
+            ) : (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/50 text-amber-300 border border-amber-600/40">
+                🧪 MODO DEMO
+              </span>
+            )}
             <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/60">
               IR Sky
             </span>
@@ -151,6 +169,18 @@ export function Header({ onOpenEmbed, onOpenHelp }: HeaderProps) {
         >
           <HelpIcon size={15} />
         </button>
+
+        {/* Optional View Switcher */}
+        {onSwitchView && (
+          <button
+            onClick={onSwitchView}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 text-xs transition-colors border border-indigo-700/60"
+            title="Volver a la portada educativa"
+          >
+            <span>🌟</span>
+            <span className="hidden md:inline">Portada</span>
+          </button>
+        )}
       </div>
 
       {/* 4. Preset Buttons Bar */}
@@ -162,6 +192,7 @@ export function Header({ onOpenEmbed, onOpenHelp }: HeaderProps) {
           {PRESET_TARGETS.map((preset) => {
             const isCurrent = target.name === preset.name;
             const shortTag: Record<string, string> = {
+              m101: 'SPHEREx QR3 (1.49 µm)',
               wise0855: 'Enana marrón fría (-23°C)',
               barnard: 'Récord velocidad (10.4"/a)',
               eps_indi_b: 'Par binario (Metano)',
@@ -185,13 +216,15 @@ export function Header({ onOpenEmbed, onOpenHelp }: HeaderProps) {
                 }}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs whitespace-nowrap transition-all border ${
                   isCurrent
-                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400 shadow-sm shadow-cyan-500/20 font-bold'
+                    ? preset.id === 'm101'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400 shadow-sm shadow-emerald-500/20 font-bold'
+                      : 'bg-cyan-500/20 text-cyan-300 border-cyan-400 shadow-sm shadow-cyan-500/20 font-bold'
                     : 'bg-slate-950/60 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
                 }`}
                 title={`${preset.tagline} - ${preset.whyUnique}`}
               >
                 <span>{preset.name}</span>
-                <span className={`text-[10px] ${isCurrent ? 'text-cyan-400/80 font-normal' : 'text-slate-500'}`}>
+                <span className={`text-[10px] ${isCurrent ? (preset.id === 'm101' ? 'text-emerald-400/80 font-normal' : 'text-cyan-400/80 font-normal') : 'text-slate-500'}`}>
                   · {shortTag[preset.id] || preset.category}
                 </span>
               </button>

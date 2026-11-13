@@ -7,7 +7,7 @@ import {
   CatalogMarker, 
   ContaminationFlag 
 } from './types';
-import { PRESET_TARGETS, SPHEREX_102_BANDS, SPHEREX_DETECTORS } from './constants';
+import { PRESET_TARGETS, SPHEREX_102_BANDS } from './constants';
 import { celestialToPixel } from './wcs';
 
 // Seeded pseudo-random generator for consistent astronomical fields

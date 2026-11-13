@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { HelpIcon, SparklesIcon, InfoIcon } from './Icons';
+import { HelpIcon, InfoIcon } from './Icons';
 
 interface KeyboardHelpModalProps {
   isOpen: boolean;

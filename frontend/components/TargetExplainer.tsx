@@ -2,13 +2,20 @@
 
 import React from 'react';
 import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
-import { SparklesIcon, InfoIcon, ActivityIcon } from './Icons';
 
 export function TargetExplainer() {
-  const { target, mode, blinkMode, currentEpoch } = useSpherexStore();
+  const { target } = useSpherexStore();
 
   const getScienceInsight = () => {
     switch (target.name) {
+      case 'M101 (Galaxia del Molinete)':
+        return {
+          badge: 'Datos Reales SPHEREx QR3 · Región Extragaláctica',
+          temp: 'Infrarrojo Cercano (~1.49 µm)',
+          dist: '21 millones de años luz',
+          speed: '0.0 mas/año (Campo Estático)',
+          guide: 'Comparación fotométrica de dos observaciones reales de NASA SPHEREx tomadas el 17 de mayo y el 24 de junio de 2026 (separación de 37.7 días). Ambas imágenes fueron re-muestreadas sobre una cuadrícula astrométrica idéntica (30×30 píxeles, 6.15"/px) con máscara de píxeles válidos.',
+        };
       case 'WISE 0855-0714':
         return {
           badge: 'Sub-enana Marrón (Y4) · Objeto Más Frío',

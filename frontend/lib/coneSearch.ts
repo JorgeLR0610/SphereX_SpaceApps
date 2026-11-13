@@ -669,7 +669,7 @@ export async function realConeSearch(params: ConeSearchParams): Promise<ConeResu
 // ============================================================================
 
 export async function searchCone(params: ConeSearchParams): Promise<ConeSearchResponse> {
-  const { ra, dec, radiusArcmin, useReal = true, signal } = params;
+  const { ra, dec, radiusArcmin, useReal = true } = params;
 
   if (useReal && typeof window !== 'undefined' && navigator.onLine) {
     try {

@@ -4,7 +4,7 @@
 
 **Source:** local checkout of `el-raton-vaquero/pruebaSpaceApps`, baseline commit `c92b686`, plus the M1 changes accompanying this report.
 
-**Verification level:** source inspection, installed/locked Python dependencies, offline tests, live IRSA queries/downloads, FITS inspection, rendered comparison, and verified FastAPI endpoints (`/health` and `GET /frames`). **Frontend application, npm build/lint and browser integration were not executed (reserved for M3).**
+**Verification level:** source inspection, installed/locked Python dependencies, offline tests, live IRSA queries/downloads, FITS inspection, rendered comparison, verified FastAPI endpoints (`/health` and `GET /frames`), Next.js `/api/*` rewrite proxy, Turbopack build/lint, and authentic headless Chromium E2E browser testing verifying real SPHEREx QR3 M101 observation playback and synthetic demo mode.
 
 ## Project goal
 NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people explore SPHEREx infrared sky observations over time and visually identify interesting apparent changes/moving objects. The MVP should compare genuine SPHEREx observations in one sky region, on different dates, ideally using comparable spectral bands, with clear provenance. Discovery of a new planet is neither assumed nor required for the proposed engineering plan.
@@ -95,7 +95,7 @@ Matplotlib 3.11.2, Reproject 0.21.0 and pytest 9.2.0 in `server/.venv`. Frontend
 ## Current milestone
 **M0: Frontend simulation prototype exists. M1: Real-data visualization feasibility
 established for M101; WISE-field negative result documented. M2: Minimal scientific
-API implemented and verified with FastAPI (`/health` and `GET /frames`); 44 tests pass. M3 not started.**
+API implemented and verified with FastAPI (`/health` and `GET /frames`). M3: Full Next.js ↔ FastAPI integration COMPLETED and VERIFIED. 47 backend tests pass; frontend lints cleanly; Next.js builds successfully; headless Chromium E2E browser tests pass with authentic screenshots captured.**
 
-Next work is M3 (connecting Next.js frontend to the FastAPI `/frames` endpoint with proxy/URL routing, numeric `pixelData` handling, and real-data UI labels). Preserve mock mode.
+Next work is M4 (Scientific Polish & Honest Moving Target Demonstration) and M5 (Calibrated WCS/Wavelengths & Real Spectral Extraction).
 See `docs/data-validation.md` and `server/README.md` for exact tested commands.

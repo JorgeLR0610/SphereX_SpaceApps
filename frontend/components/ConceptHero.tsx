@@ -2,10 +2,10 @@
 
 import React from 'react';
 import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
-import { SparklesIcon, PlayIcon } from './Icons';
+import { SparklesIcon } from './Icons';
 
 export function ConceptHero() {
-  const { mode, blinkMode, detective, overlays } = useSpherexStore();
+  const { mode, detective } = useSpherexStore();
 
   return (
     <div className="w-full flex flex-col gap-3">

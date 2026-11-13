@@ -3,20 +3,37 @@
 import React, { useState } from 'react';
 import { useSpherexStore } from '../store/useSpherexStore';
 import { SPHEREX_DETECTORS } from '../lib/constants';
-import { ActivityIcon, InfoIcon, SparklesIcon } from './Icons';
+import { ActivityIcon } from './Icons';
 
 export function SpectrumPanel() {
-  const { spectrum, selectedPixel, currentEpoch } = useSpherexStore();
+  const { spectrum, selectedPixel, currentEpoch, frames, provenance } = useSpherexStore();
   const [hoveredPoint, setHoveredPoint] = useState<import('../lib/types').SpectrumPoint | null>(null);
+
+  const isRealData = Boolean(
+    provenance?.data_origin === 'observed_spherex' ||
+    (frames && frames.length > 0 && (
+      frames[0].provenance?.data_origin === 'observed_spherex' ||
+      (typeof frames[0].provenance?.collection === 'string' && frames[0].provenance.collection.includes('spherex'))
+    ))
+  );
 
   if (!spectrum || !spectrum.points || spectrum.points.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-xl text-center">
-        <ActivityIcon size={32} className="text-slate-600 mb-2" />
-        <div className="text-sm font-semibold text-slate-300">Espectro al Vuelo (102 Bandas)</div>
-        <div className="text-xs text-slate-500 max-w-sm mt-1">
-          Haz clic en cualquier píxel o en el objeto en movimiento en el visor para extraer su espectro infrarrojo continuo de 0.75 µm a 5.0 µm.
+        <ActivityIcon size={32} className={isRealData ? 'text-cyan-500/70 mb-2' : 'text-slate-600 mb-2'} />
+        <div className="text-sm font-semibold text-slate-300">
+          {isRealData ? 'Observación Monobanda SPHEREx (Nivel 2)' : 'Espectro al Vuelo (102 Bandas)'}
         </div>
+        <div className="text-xs text-slate-400 max-w-md mt-1.5 leading-relaxed">
+          {isRealData
+            ? 'Los datos actuales corresponden a imágenes individuales de Nivel 2 en el Detector 2 (~1.49 µm). La extracción y calibración de cubos espectrales completos de 102 bandas sobre observaciones reales está programada para el hito M5.'
+            : 'Haz clic en cualquier píxel o en el objeto en movimiento en el visor para extraer su espectro infrarrojo continuo de 0.75 µm a 5.0 µm.'}
+        </div>
+        {isRealData && (
+          <div className="mt-3 px-3 py-1 rounded bg-slate-800/80 border border-slate-700 text-[11px] font-mono text-cyan-300">
+            Píxel seleccionado: [{selectedPixel?.x}, {selectedPixel?.y}] · Longitud de onda: ~1.49 µm
+          </div>
+        )}
       </div>
     );
   }
