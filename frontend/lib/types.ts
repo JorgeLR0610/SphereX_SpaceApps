@@ -51,6 +51,9 @@ export interface Frame {
     mean: number;
     std: number;
   };
+  validMask?: number[];
+  units?: string;
+  provenance?: Record<string, unknown>;
 }
 
 export interface DetectiveTarget {
@@ -72,6 +75,8 @@ export interface FramesResponse {
   frames: Frame[];
   epochs: { epoch: number; date: string; mjd: number }[];
   detectiveTarget?: DetectiveTarget;
+  validMask?: number[];
+  provenance?: Record<string, unknown>;
 }
 
 export interface SpectrumPoint {

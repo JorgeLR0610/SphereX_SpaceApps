@@ -1,53 +1,53 @@
-# Frontend ↔ scientific API contract (draft)
+# Frontend ↔ scientific API contract
 
-This documents **current frontend expectations**, not an existing functioning backend. Validate types with source before editing. Source of truth: `frontend/lib/types.ts`, `lib/apiAdapter.ts`, `store/useSpherexStore.ts`.
+This documents the scientific API contract implemented in Milestone M2 (`server/spherex/api.py`). Source of truth: `frontend/lib/types.ts`, `server/spherex/models.py`.
 
 ## Transport and routing
-Frontend currently uses `new RealSpherexAPI('/api')`, enabled by `NEXT_PUBLIC_USE_REAL_API=true`. A FastAPI server could expose `/frames` and `/spectrum`; Next.js must proxy `/api/*` to it, **or** change adapter base URL explicitly. No proxy was present in the reviewed tree.
+- FastAPI service runs locally on port 8000: `uv run --locked uvicorn spherex.api:app --port 8000`.
+- Frontend uses `RealSpherexAPI` when `NEXT_PUBLIC_USE_REAL_API=true`.
+- Endpoints:
+  - `GET /health`: Health status, version, and confirmation of cached dataset.
+  - `GET /frames?ra=<deg>&dec=<deg>&fov=<arcmin>`: Returns real, WCS-aligned observations.
+  - `GET /spectrum` (M4): Not implemented yet. Returns 404/unavailable for real data.
 
-### `GET /api/frames?ra=<deg>&dec=<deg>&fov=<arcmin>`
-- `ra`: degrees, [0, 360); `dec`: degrees, [-90,90]; `fov`: requested field of view, arcminutes, currently UI range [1,30]. Backend must validate bounds and cap downloads/computation.
-- Current response type: `FramesResponse`: `target`, `wcs`, `fovArcmin`, `frames[]`, `epochs[]`, optional `detectiveTarget`.
-- Each `Frame` has `id`, `mjd`, `date`, `epochIndex`, `detector`, `band` `{lambda_um,width_um,detector,index}`, `flags[]`, `width`, `height`, `pixelData`, optional target/variability fields and `stats` `{min,max,median,mean,std}`.
-- `WCS`: `{crpix:[x,y], crval:[ra,dec], cdelt:<deg/pixel>, size:[width,height]}`.
-- **Important:** server JSON should send `pixelData` as flat row-major numeric array (length width*height). `RealSpherexAPI.getFrames()` must convert it to `Float32Array`. Large data volume may warrant a versioned binary transport later.
-- **Important:** actual astronomical WCS may include rotated/projection terms incompatible with scalar `cdelt`. Either reproject all images onto an accurately documented common grid representable by this contract, or agree on a new richer WCS schema and update UI coordinate transforms together. Do not drop transforms and pretend unchanged sky geometry.
-- `epochs` and `frames` must represent **actual available observations**. The fake four-epoch/six-detector distribution is not guaranteed.
-- Do not emit `movingTargetPixel` or `detectiveTarget` as though measured when those are derived from guesses/catalog predictions; identify provenance in an agreed schema extension.
+### `GET /frames?ra=<deg>&dec=<deg>&fov=<arcmin>`
+- `ra`: degrees, [0, 360); `dec`: degrees, [-90,90]; `fov`: requested field of view in arcminutes, range [1, 30].
+- **Response Type:** `FramesResponse` compatible with `frontend/lib/types.ts`:
+  - `target`: `Target` `{ra, dec, name, category, description}`
+  - `wcs`: `WCS` `{crpix: [15, 15], crval: [210.80227, 54.34895], cdelt: 0.0017088, size: [30, 30]}`
+  - `fovArcmin`: number (e.g. 3.0)
+  - `epochs`: list of `{epoch, date, mjd}`
+  - `frames`: list of `Frame`:
+    - `id`: observation ID (e.g. `2026W20_2A_0464_3`)
+    - `mjd`, `date`: UTC observation timestamps (from `MJD-OBS`/`DATE-OBS`)
+    - `epochIndex`: integer (0, 1, ...)
+    - `detector`: integer (1 to 6; M101 uses Detector 2)
+    - `band`: `{lambda_um, width_um, detector, index}`
+    - `flags`: `["clean"]`
+    - `width`, `height`: 30, 30
+    - `pixelData`: row-major numeric array (length 900) of surface brightness in `MJy / sr`. Invalid pixels are serialized as `0.0` (never `NaN` or `null`).
+    - `validMask`: row-major binary array (length 900) where `1` = scientifically valid, `0` = excluded/masked.
+    - `stats`: `{min, max, median, mean, std}` computed strictly over valid pixels.
+    - `units`: `"MJy / sr"`
+    - `provenance`: observation metadata and archive collection.
+  - `validMask`: shared grid validity mask (769 valid pixels, 85.44%).
+  - `provenance`: mission citation, observation IDs, time separation (37.68 days), matched spectral metrics, and scientific limitations.
 
-### Example **shape only** (numbers are illustrative, NOT observed SPHEREx data)
-```json
-{
-  "target": {"ra": 133.7951, "dec": -7.2451, "name": "Example target"},
-  "wcs": {"crpix": [1,1], "crval": [133.7951,-7.2451], "cdelt": -0.0001, "size": [2,2]},
-  "fovArcmin": 1,
-  "epochs": [{"epoch": 0, "date": "EXAMPLE_TIMESTAMP_REPLACE_WITH_REAL", "mjd": 0}],
-  "frames": [{
-    "id": "EXAMPLE_NOT_REAL", "mjd": 0, "date": "EXAMPLE_TIMESTAMP_REPLACE_WITH_REAL",
-    "epochIndex": 0, "detector": 1,
-    "band": {"lambda_um": 1, "width_um": 0.01, "detector": 1, "index": 0},
-    "flags": ["clean"], "width": 2, "height": 2,
-    "pixelData": [1,2,3,4],
-    "stats": {"min": 1, "max": 4, "median": 2.5, "mean": 2.5, "std": 1.118}
-  }]
-}
-```
-**Never use this example as actual sky data.** Proposed future extension: `provenance` with archive, collection, product IDs, URLs, units, processing and real/synthetic status. Frontend types must be extended in tandem.
+### Orientation and Coordinates
+- In astronomical FITS files (`aligned.fits`), row 0 is South (`CDELT2 > 0`, `origin='lower'`).
+- In API JSON (`pixelData`), rows are serialized North-up (`np.flipud(fits_array)`), matching web canvas coordinates and `frontend/lib/wcs.ts` tangent projection (`y = 0` corresponds to North, `x = 0` corresponds to East).
 
-### `GET /api/spectrum?ra=...&dec=...&fov=...&x=...&y=...`
-- The current frontend expects `Spectrum` containing `ra`, `dec`, `pixel:{x,y}`, `points[]` with `lambda_um`, `flux`, `err`, `detector`, `bandIndex`; optional epoch series/features/object identification.
-- A real spectrum cannot be synthesized from a single arbitrary broadband image. Identify compatible SPHEREx calibrated spectral data and validity/uncertainty first. Until implemented, return explicit unavailable/error response and have frontend show 'Not available for real data', not mock spectrum.
-
-## Errors and data safety
-- Define stable 400/422 for invalid requests, 404/204 or a documented empty result when no observations, 502/503 for upstream errors, with structured diagnostics; align with frontend handling.
-- Timeout external requests, cap number and dimensions of images, control FITS caching and avoid accidental multi-GB JSON payloads.
-- Distinguish real, synthetic and catalog-derived data in responses/UI. Preserve archive provenance even for cached images.
+### Errors and Data Safety
+- HTTP 422: Parameter validation error (out-of-bounds coordinates, non-numeric values).
+- HTTP 404: Region not supported in MVP (only verified M101 region is supported).
+- HTTP 503: Data unavailable on server (e.g. cached FITS products not prepared on disk).
 
 ## Contract integration checklist
-- [ ] Backend and frontend agree on endpoint routing.
-- [ ] `Float32Array` conversion tested.
-- [ ] Shape/order/finite pixel values and NaN/null masking tested.
-- [ ] WCS orientation and alignment tested with known coordinates.
-- [ ] Variable epochs/bands supported.
-- [ ] Response provenance and UI labeling tested.
-- [ ] Spectrum unavailable behavior agreed.
+- [x] Backend implemented with FastAPI (`server/spherex/api.py`).
+- [x] Shape/order/finite pixel values and NaN-free masking tested.
+- [x] WCS orientation and alignment verified with known coordinates (row 0 = North).
+- [x] Variable epochs supported (2 verified epochs for M101).
+- [x] Response provenance, units, and validity masks included in schema.
+- [ ] M3: Reverse proxy or CORS routing configured between Next.js and FastAPI.
+- [ ] M3: Frontend adapter converts numeric array into `Float32Array`.
+- [ ] M4: Spectrum unavailable behavior agreed / implemented.

@@ -22,15 +22,17 @@ derived comparison. Precision CWAVE/CBAND spectral validation, PSF matching,
 photometry and motion detection are **not** completed by this milestone.
 
 ## M2 — Minimal scientific API
-- [ ] Add the minimal scientific service package under `server/` (the M1 venv,
+- [x] Add the minimal scientific service package under `server/` (the M1 venv,
       dependency lock, setup instructions and offline tests already exist).
-- [ ] Implement bounded, timeout-aware IRSA discovery/download service with local caching.
-- [ ] Implement FITS parser and WCS-aware cutout/reprojection; don't silently flip astronomical axes.
-- [ ] Implement `GET /frames` matching the documented frontend contract, returning a scientifically valid subset (2 frames is enough).
-- [ ] Include real source identity, dates, spectral descriptors, image dimensions, masks/quality where available, and errors for unsupported queries.
-- [ ] Test JSON schemas, WCS normalization, pixel matrix shape/order, parameter bounds, no-results and remote-errors cases.
+- [x] Implement bounded, timeout-aware IRSA discovery/download service with local caching (`spherex.archive`).
+- [x] Implement FITS parser and WCS-aware cutout/reprojection; don't silently flip astronomical axes (`spherex.fits`, `spherex.alignment`).
+- [x] Implement `GET /frames` matching the documented frontend contract, returning a scientifically valid subset (2 frames is enough).
+- [x] Include real source identity, dates, spectral descriptors, image dimensions, masks/quality where available, and errors for unsupported queries.
+- [x] Test JSON schemas, WCS normalization, pixel matrix shape/order, parameter bounds, no-results and remote-errors cases.
 
 **Definition of done:** `/frames` serves real measurements with reproducible metadata, responds safely to bad/empty requests and is tested.
+
+**M2 result:** Completed. Modular scientific package under `server/spherex/` implemented with FastAPI application (`spherex.api:app`). Endpoints `/health` and `GET /frames` return the two verified M101 observations (`2026W20_2A_0464_3` and `2026W26_1A_0500_1`, 37.68 days apart) on a 30×30 ICRS TAN grid. Returned arrays have correct orientation matching `frontend/lib/wcs.ts` (row 0 = North), masked non-finite pixels are zeroed with an explicit binary `validMask` (769 valid pixels, 85.44%), and provenance is preserved. 44 automated tests pass in pytest (`test_api.py`, `test_modules.py`, and `test_data_validation.py`). Ready for M3 frontend integration.
 
 ## M3 — Connect Next.js
 - [ ] Add a documented reverse proxy/rewrite or configurable API URL for `/api/*`. Prefer relative same-origin calls to avoid CORS surprises.

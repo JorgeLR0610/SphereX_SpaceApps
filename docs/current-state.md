@@ -4,7 +4,7 @@
 
 **Source:** local checkout of `el-raton-vaquero/pruebaSpaceApps`, baseline commit `c92b686`, plus the M1 changes accompanying this report.
 
-**Verification level:** source inspection, installed/locked Python dependencies, offline tests, live IRSA queries/downloads, FITS inspection and rendered comparison. **Frontend application, npm build/lint and browser integration were not executed. There is no HTTP backend yet.**
+**Verification level:** source inspection, installed/locked Python dependencies, offline tests, live IRSA queries/downloads, FITS inspection, rendered comparison, and verified FastAPI endpoints (`/health` and `GET /frames`). **Frontend application, npm build/lint and browser integration were not executed (reserved for M3).**
 
 ## Project goal
 NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people explore SPHEREx infrared sky observations over time and visually identify interesting apparent changes/moving objects. The MVP should compare genuine SPHEREx observations in one sky region, on different dates, ideally using comparable spectral bands, with clear provenance. Discovery of a new planet is neither assumed nor required for the proposed engineering plan.
@@ -20,10 +20,9 @@ NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people ex
 - `frontend/lib/coneSearch.ts` — mocked local catalog and additional cone-search logic; review before claiming a real catalog result.
 - `frontend/AGENTS.md` — existing Next.js generated agent rules. Preserve it.
 - `frontend/README.md` — mostly create-next-app starter text.
-- `server/` — standalone M1 science spike, **not a FastAPI service**. The existing
-  Python ≥3.14 manifest now has scientific dependencies and `uv.lock`.
-- `server/scripts/validate_irsa.py`, `server/tests/test_data_validation.py`,
-  `server/README.md` — bounded archive experiment, offline tests and exact commands.
+- `server/` — scientific service package (`server/spherex/`) and FastAPI application (`spherex.api:app`).
+- `server/spherex/` — modular packages for `archive`, `fits`, `alignment`, `models`, `service`, `prepare`, and `api`.
+- `server/scripts/validate_irsa.py`, `server/tests/` — standalone CLI (delegating to `spherex.*`), 44 automated tests across `test_data_validation.py`, `test_modules.py`, and `test_api.py`.
 - `docs/data-validation.md` — executed queries, real FITS provenance, accepted
   M101 pair, negative WISE-field result, method and limitations.
 - `docs/assets/m1-m101-comparison.png` — small measured-data comparison; bulk FITS,
@@ -95,10 +94,8 @@ Matplotlib 3.11.2, Reproject 0.21.0 and pytest 9.2.0 in `server/.venv`. Frontend
 
 ## Current milestone
 **M0: Frontend simulation prototype exists. M1: Real-data visualization feasibility
-established for M101; WISE-field negative result documented. M2/M3 not started.**
+established for M101; WISE-field negative result documented. M2: Minimal scientific
+API implemented and verified with FastAPI (`/health` and `GET /frames`); 44 tests pass. M3 not started.**
 
-Next work is a narrowly scoped M2 using the proven M101 pair and explicit
-provenance/limitations. Preserve mock mode. Quantitative spectral/photometric
-claims require further calibration work; the frontend still needs variable frame
-counts, real-data labels, JSON conversion and a richer/normalized WCS decision.
+Next work is M3 (connecting Next.js frontend to the FastAPI `/frames` endpoint with proxy/URL routing, numeric `pixelData` handling, and real-data UI labels). Preserve mock mode.
 See `docs/data-validation.md` and `server/README.md` for exact tested commands.
