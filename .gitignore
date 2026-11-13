@@ -1,7 +1,7 @@
 ### NextJS ###
 # dependencies
-/node_modules
-/.pnp
+node_modules
+.pnp
 .pnp.js
 .yarn/*
 !.yarn/patches
@@ -10,11 +10,11 @@
 !.yarn/versions
 
 # testing
-/coverage
+coverage
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
 /build
