@@ -43,7 +43,10 @@ npm run dev
 npm run lint
 npm run build
 ```
-The scientific service commands do not exist yet. Document exact setup, run, and test commands in `server/`'s README; prefer a Python virtual environment and reproducible pinned dependencies via uv package manager (already initiated).
+The M1 scientific CLI (not an HTTP service) now has exact uv setup, run, offline
+replay and test commands in `server/README.md`; provenance and limitations are in
+`docs/data-validation.md`. Keep using a Python virtual environment and the
+checked-in dependency lock. FastAPI service commands do not exist yet.
 
 ## When accepting a task
 - Restate the requested outcome, affected paths, and how success will be tested in a short plan.

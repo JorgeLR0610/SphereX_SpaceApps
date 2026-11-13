@@ -1,19 +1,29 @@
 # Implementation plan / prioritized backlog
 
-Deadline context: NASA Space Apps Challenge 2026 weekend, November 14–15. Prioritize demonstrated science and stable integration. These are **proposed** milestones, not completed work.
+Deadline context: NASA Space Apps Challenge 2026 weekend, November 14–15, as
+recorded in the original planning notes (challenge page was not independently
+retrievable during M1). Prioritize demonstrated science and stable integration.
+M1 execution evidence was added 2026-11-13 UTC; later milestones remain proposed.
 
 ## M1 — IRSA data feasibility (highest priority)
-- [ ] Review the official archive's current datasets, query API, product types, licenses/citation and cutout method.
-- [ ] Build a reproducible Python script/notebook that queries one small sky region (start from WISE 0855 coordinates RA 133.7951°, Dec −7.2451° only as a candidate, **not a guaranteed detectable target**).
-- [ ] Download at least one **real SPHEREx FITS** product/cutout and inspect image arrays, headers, units, WCS, time, wavelength, quality metadata.
-- [ ] Find a second time-separated observation of the *same sky footprint* in a comparable spectral band, or document that no suitable pair is available and test another field.
-- [ ] Produce an aligned, side-by-side or blink comparison **from measured data**. Verify orientation, footprint, background and whether movement is observable at actual angular resolution.
-- [ ] Record archive source URLs, product IDs, MJD/UTC dates, wavelengths, processing decisions, actual commands and limitations in `docs/data-validation.md` (create upon execution).
+- [x] Review the official archive's current datasets, query API, product types, licenses/citation and cutout method. Official acknowledgement recorded; separate FITS redistribution license not established.
+- [x] Build a reproducible Python script/notebook that queries one small sky region (start from WISE 0855 coordinates RA 133.7951°, Dec −7.2451° only as a candidate, **not a guaranteed detectable target**).
+- [x] Download at least one **real SPHEREx FITS** product/cutout and inspect image arrays, headers, units, WCS, time, wavelength, quality metadata.
+- [x] Find a second time-separated observation of the *same sky footprint* in a comparable spectral band, or document that no suitable pair is available and test another field. WISE-field sample did not meet coverage threshold; M101 passed.
+- [x] Produce an aligned, side-by-side or blink comparison **from measured data**. Verify orientation, footprint, background and whether movement is observable at actual angular resolution. M101 is a static-field visualization, not measured motion; approximate WCS-WAVE and PSF/background limitations remain explicit.
+- [x] Record archive source URLs, product IDs, MJD/UTC dates, wavelengths, processing decisions, actual commands and limitations in `docs/data-validation.md`.
 
 **Definition of done:** two traceable, real, compatible observations displayed and compared, or a reproducible negative result with next best candidate. No invented observation metadata.
 
+**M1 result:** established at visualization level using M101 QR3 observations
+37.681 days apart, 85.444% common valid/spectrally matched grid coverage; 25 offline
+tests pass. See `docs/data-validation.md` for provenance, negative runs and the
+derived comparison. Precision CWAVE/CBAND spectral validation, PSF matching,
+photometry and motion detection are **not** completed by this milestone.
+
 ## M2 — Minimal scientific API
-- [ ] Add `backend/` Python package, venv/setup instructions, dependency lock or pinned requirements, smoke tests.
+- [ ] Add the minimal scientific service package under `server/` (the M1 venv,
+      dependency lock, setup instructions and offline tests already exist).
 - [ ] Implement bounded, timeout-aware IRSA discovery/download service with local caching.
 - [ ] Implement FITS parser and WCS-aware cutout/reprojection; don't silently flip astronomical axes.
 - [ ] Implement `GET /frames` matching the documented frontend contract, returning a scientifically valid subset (2 frames is enough).
@@ -44,4 +54,3 @@ Deadline context: NASA Space Apps Challenge 2026 weekend, November 14–15. Prio
 - **Reviewer/integration agent:** API contracts, tests, provenance, performance and demo verification.
 
 Avoid parallel edits to `frontend/lib/apiAdapter.ts`, `lib/types.ts` and `store/useSpherexStore.ts` without an agreed owner. Have each contributor report paths touched and verified commands.
-

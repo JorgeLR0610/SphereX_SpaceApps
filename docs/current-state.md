@@ -1,8 +1,10 @@
 # Project current state
 
-**Snapshot date:** 2026-11-12  
-**Source:** `el-raton-vaquero/pruebaSpaceApps`, default branch `Main`, inspected via GitHub source/tree.  
-**Verification level:** source inspection only — **the application, live IRSA requests, npm build, tests and Python backend were not executed**.
+**Snapshot date:** 2026-11-13 UTC (session started with stated date 2026-11-12).
+
+**Source:** local checkout of `el-raton-vaquero/pruebaSpaceApps`, baseline commit `c92b686`, plus the M1 changes accompanying this report.
+
+**Verification level:** source inspection, installed/locked Python dependencies, offline tests, live IRSA queries/downloads, FITS inspection and rendered comparison. **Frontend application, npm build/lint and browser integration were not executed. There is no HTTP backend yet.**
 
 ## Project goal
 NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people explore SPHEREx infrared sky observations over time and visually identify interesting apparent changes/moving objects. The MVP should compare genuine SPHEREx observations in one sky region, on different dates, ideally using comparable spectral bands, with clear provenance. Discovery of a new planet is neither assumed nor required for the proposed engineering plan.
@@ -18,6 +20,14 @@ NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people ex
 - `frontend/lib/coneSearch.ts` — mocked local catalog and additional cone-search logic; review before claiming a real catalog result.
 - `frontend/AGENTS.md` — existing Next.js generated agent rules. Preserve it.
 - `frontend/README.md` — mostly create-next-app starter text.
+- `server/` — standalone M1 science spike, **not a FastAPI service**. The existing
+  Python ≥3.14 manifest now has scientific dependencies and `uv.lock`.
+- `server/scripts/validate_irsa.py`, `server/tests/test_data_validation.py`,
+  `server/README.md` — bounded archive experiment, offline tests and exact commands.
+- `docs/data-validation.md` — executed queries, real FITS provenance, accepted
+  M101 pair, negative WISE-field result, method and limitations.
+- `docs/assets/m1-m101-comparison.png` — small measured-data comparison; bulk FITS,
+  downloaded caches and generated local outputs are ignored, not committed.
 
 ## Behavior confirmed by reading source
 - `NEXT_PUBLIC_USE_REAL_API=true` switches the adapter from mock to HTTP mode; without it, the frontend uses synthetic data.
@@ -26,10 +36,40 @@ NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people ex
 - `Frame.pixelData` is a browser `Float32Array`; raw JSON array conversion is required for a simple HTTP contract.
 - The WCS TypeScript type is simplified (`crpix`, `crval`, scalar `cdelt`, `size`). Real FITS WCS may require rotation/projection and reprojection onto a common output grid.
 - The frontend viewer supports sophisticated controls, but scientific validity and actual operation with real observations are **unverified**.
+- Cone search has a SIMBAD HTTP branch and automatic mock fallback; it is not
+  SPHEREx observation discovery. Its live operation was not tested in this task.
+
+## M1 behavior verified by execution
+- Official current releases are DR1 + QR3. SIA2 discovery and IBE cutout downloads
+  work; QR2 is superseded. Spectral wavelength varies within each detector.
+- WISE candidate field (RA 133.7951°, Dec −7.2451°): DR1 258 rows, QR3 zero,
+  45 detector-6 candidates. A 24-product sample yielded a closely wavelength-
+  matched 370.396-day pair, but only 78.667% common valid coverage after padded
+  download/reprojection, below the unchanged 80% acceptance threshold.
+- M101 (RA 210.80227°, Dec 54.34895°): DR1 249 rows, QR3 130, 84 detector-2
+  candidates. A 24-product sample yielded QR3 observations `2026W20_2A_0464_3`
+  and `2026W26_1A_0500_1`, **37.681 days apart**, at approximate local wavelengths
+  **1.489543 / 1.489986 µm**. Their 30×30 common-grid comparison retained
+  **85.444%** valid, wavelength-matched pixels and was visually inspected.
+- `DATE-OBS`/`MJD-OBS` are checked against discovery metadata; `DATE` is HDU
+  creation time. Celestial TAN-SIP WCS is preserved; spectral WCS uses its lookup
+  table without SIP. Quality flags, variance, ZODI, ePSF and units were inspected.
+- `uv sync --locked` passed; `uv run --locked pytest -q` passed **25 tests**, no warnings.
+  M101 live execution and cached replay returned exit 0; WISE runs returned
+  explicit negative status (exit 2). Transient cutout HTTP 503s were recorded and
+  recovered on a later run. No synthetic archive fallback was used.
+- A subsequent live request failed with `Network is unreachable`. Explicit
+  `--offline` replay of saved responses/hash-verified real cutouts reproduced
+  both results. This mode is labelled and never silently substitutes data.
+  Completed-run manifests are retained alongside the latest result.
+- This establishes a **visualization-level** real-data comparison, not precision
+  spectral equivalence, photometry, object identification, motion or discovery.
 
 ## Known gaps / integration risks
-1. No validated live SPHEREx download and FITS parsing workflow.
-2. No verified pair of images taken on different dates with sufficiently comparable footprint and wavelength for a meaningful side-by-side/blink.
+1. Precision quantitative processing remains unvalidated: current wavelength
+   matching uses approximate visualization WCS-WAVE, not calibrated CWAVE/CBAND.
+2. No validated moving-object detection/showcase. M101 demonstrates a matched
+   static field; the initial WISE field did not pass the chosen coverage threshold.
 3. No scientific API server or Next.js reverse proxy configured to route `/api/*` to Python.
 4. No production-real `FramesResponse` compatible with current `lib/types.ts`.
 5. No validated spectrum extraction. A plotted synthetic spectrum must not be presented as observed data.
@@ -37,14 +77,28 @@ NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people ex
 7. Scientific noise, masks/quality flags, FITS units, WCS transforms and alignment require explicit handling.
 8. Real-data latency, offline fallback, file sizes and request failure states require UI treatment.
 9. Standardized backend tests, reproducible scientific dataset fixture and deployed full-stack demo are not yet evidenced.
+10. A separate FITS-data redistribution license was not established; the official
+    acknowledgement is documented. Do not assume the documentation site's BSD
+    license applies to data. No bulk FITS data are included.
+
+Installed locally for M1: Python 3.14.10 / uv 0.13.5, Astropy 8.0.2, NumPy 2.5.4,
+Matplotlib 3.11.2, Reproject 0.21.0 and pytest 9.2.0 in `server/.venv`. Frontend
+`node_modules` was absent at inspection and was not installed or modified.
 
 ## Decisions agreed / proposed
 - **Agreed in discussion:** move toward a monorepo; preserve existing Next.js frontend, add independent scientific backend.
-- **Recommended (not yet implemented):** Python + FastAPI + Astropy + NumPy + PyVO/astroquery; fit testable IRSA fetching, FITS reading and reprojection into small modules.
+- **Partially implemented:** Python + Astropy + NumPy + Reproject feasibility
+  script, using direct bounded SIA2 HTTP queries. FastAPI and service modules
+  remain M2; PyVO/astroquery are not needed by the current spike.
 - **Recommended:** real image acquisition and validation first, API and frontend integration second, real spectrum and automated detection only if time remains.
 - **Non-goal:** suggesting Planet X has been found; showing simulated or catalog-predicted motion without a visible label.
 
 ## Current milestone
-**M0: Frontend simulation prototype exists. M1: Real SPHEREx data feasibility not established.**
+**M0: Frontend simulation prototype exists. M1: Real-data visualization feasibility
+established for M101; WISE-field negative result documented. M2/M3 not started.**
 
-Next agent should pursue `docs/implementation-plan.md` M1 and update this status with objective evidence. When the repo changes, update this page with date, commit SHA, new milestones and exact tested commands. Avoid marking unverified tasks complete.
+Next work is a narrowly scoped M2 using the proven M101 pair and explicit
+provenance/limitations. Preserve mock mode. Quantitative spectral/photometric
+claims require further calibration work; the frontend still needs variable frame
+counts, real-data labels, JSON conversion and a richer/normalized WCS decision.
+See `docs/data-validation.md` and `server/README.md` for exact tested commands.
