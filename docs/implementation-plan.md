@@ -1,0 +1,47 @@
+# Implementation plan / prioritized backlog
+
+Deadline context: NASA Space Apps Challenge 2026 weekend, November 14–15. Prioritize demonstrated science and stable integration. These are **proposed** milestones, not completed work.
+
+## M1 — IRSA data feasibility (highest priority)
+- [ ] Review the official archive's current datasets, query API, product types, licenses/citation and cutout method.
+- [ ] Build a reproducible Python script/notebook that queries one small sky region (start from WISE 0855 coordinates RA 133.7951°, Dec −7.2451° only as a candidate, **not a guaranteed detectable target**).
+- [ ] Download at least one **real SPHEREx FITS** product/cutout and inspect image arrays, headers, units, WCS, time, wavelength, quality metadata.
+- [ ] Find a second time-separated observation of the *same sky footprint* in a comparable spectral band, or document that no suitable pair is available and test another field.
+- [ ] Produce an aligned, side-by-side or blink comparison **from measured data**. Verify orientation, footprint, background and whether movement is observable at actual angular resolution.
+- [ ] Record archive source URLs, product IDs, MJD/UTC dates, wavelengths, processing decisions, actual commands and limitations in `docs/data-validation.md` (create upon execution).
+
+**Definition of done:** two traceable, real, compatible observations displayed and compared, or a reproducible negative result with next best candidate. No invented observation metadata.
+
+## M2 — Minimal scientific API
+- [ ] Add `backend/` Python package, venv/setup instructions, dependency lock or pinned requirements, smoke tests.
+- [ ] Implement bounded, timeout-aware IRSA discovery/download service with local caching.
+- [ ] Implement FITS parser and WCS-aware cutout/reprojection; don't silently flip astronomical axes.
+- [ ] Implement `GET /frames` matching the documented frontend contract, returning a scientifically valid subset (2 frames is enough).
+- [ ] Include real source identity, dates, spectral descriptors, image dimensions, masks/quality where available, and errors for unsupported queries.
+- [ ] Test JSON schemas, WCS normalization, pixel matrix shape/order, parameter bounds, no-results and remote-errors cases.
+
+**Definition of done:** `/frames` serves real measurements with reproducible metadata, responds safely to bad/empty requests and is tested.
+
+## M3 — Connect Next.js
+- [ ] Add a documented reverse proxy/rewrite or configurable API URL for `/api/*`. Prefer relative same-origin calls to avoid CORS surprises.
+- [ ] Make `RealSpherexAPI` deserialize numeric `pixelData` into `Float32Array` (or agree on a binary alternative explicitly).
+- [ ] Verify loading/error/empty states; never fall back to synthetic frames without an explicit visible choice.
+- [ ] Handle variable actual number of epochs/bands (not fixed four epochs x six detectors).
+- [ ] Run Next.js lint/build and test browser with real backend. Inspect image orientation/scale and blink results.
+
+**Definition of done:** a user can select a proven sky region and compare real observations in the existing viewer, clearly labeled as real SPHEREx data.
+
+## M4 — Optional after M1–M3
+- [ ] Genuine spectrum extraction from suitable calibrated spectral products; otherwise disable or label unavailable.
+- [ ] Catalog overlays and proper-motion prediction with explicit “catalog-derived/predicted” provenance.
+- [ ] Difference images or candidate motion detection, with masks, PSF/noise caveats and no unsupported discovery claims.
+- [ ] Guided demo targets, performance optimizations, polished submission video and accurate research citations.
+
+## Recommended agent work division
+- **Science/data agent:** M1, WCS/metadata, reproducibility and scientific integrity.
+- **API agent:** M2 service and tests, after validating data access.
+- **UI agent:** M3 frontend adapter/proxy, error handling and accurate labels.
+- **Reviewer/integration agent:** API contracts, tests, provenance, performance and demo verification.
+
+Avoid parallel edits to `frontend/lib/apiAdapter.ts`, `lib/types.ts` and `store/useSpherexStore.ts` without an agreed owner. Have each contributor report paths touched and verified commands.
+
