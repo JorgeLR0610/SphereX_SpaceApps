@@ -43,11 +43,20 @@ photometry and motion detection are **not** completed by this milestone.
 
 **Definition of done:** a user can select a proven sky region and compare real observations in the existing viewer, clearly labeled as real SPHEREx data.
 
-## M4 — Optional after M1–M3
-- [ ] Genuine spectrum extraction from suitable calibrated spectral products; otherwise disable or label unavailable.
-- [ ] Catalog overlays and proper-motion prediction with explicit “catalog-derived/predicted” provenance.
-- [ ] Difference images or candidate motion detection, with masks, PSF/noise caveats and no unsupported discovery claims.
-- [ ] Guided demo targets, performance optimizations, polished submission video and accurate research citations.
+## M4 — Post-Integration: Catalog Overlays & Time-Domain Analysis
+*Based on official resource review in `docs/official-resources-review.md` (WiseView UX & Gaia DR3).*
+- [ ] Implement Gaia DR3 / CatWISE2020 TAP cone search for real astrometric reference sources.
+- [ ] Implement epoch-aware proper motion propagation: $\Delta t = t_{\text{SPHEREx}} - 2016.0$ to project catalog coordinates onto the observation epoch.
+- [ ] Add WiseView-inspired blink animation controls (adjustable blink rate, epoch state badges `+`/`-`/`.`, loop restart indicator).
+- [ ] Implement symmetrical difference image mode ($I(t_2) - I(t_1)$) with display stretch centered at zero.
+- [ ] Ensure strict Category 2 labeling on all catalog overlays (`Gaia DR3 (J2016.0) → Predicted (t)`), never claiming detected SPHEREx tracks.
+
+## M5 — Spectrophotometry & Calibrated Spectral Extraction
+*Based on official SPHEREx Source Discovery Tool (SDT) workflows.*
+- [ ] Implement local background annulus and zodiacal light subtraction based on the SDT method.
+- [ ] Calibrated spectral extraction across available multi-detector channels ($0.75 - 5.0\,\mu\text{m}$) with photometric uncertainties.
+- [ ] Disable or visibly label uncalibrated single-band mock spectra as "Not available for real data" until full spectral pipeline is ready.
+- [ ] Guided tour targets, performance optimizations, and project submission documentation.
 
 ## Recommended agent work division
 - **Science/data agent:** M1, WCS/metadata, reproducibility and scientific integrity.
