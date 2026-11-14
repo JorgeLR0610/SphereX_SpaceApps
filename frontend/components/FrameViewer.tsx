@@ -224,7 +224,7 @@ export function FrameViewer() {
   return (
     <div 
       ref={containerRef}
-      className="relative flex-1 flex flex-col bg-slate-950 overflow-hidden border border-slate-800 rounded-2xl select-none shadow-2xl"
+      className="reference-viewer"
     >
       <div className="viewer-caption">{realMode ? 'SPHEREx QR3 · ' : 'Simulación · '}{epochs.map(e => e.date.slice(0,10)).join(' / ')} · UTC</div>
       {/* Main Viewport Container */}
@@ -339,9 +339,11 @@ export function FrameViewer() {
             ref={canvasRef}
             width={frameSize}
             height={frames[0]?.height || frameSize}
+            style={{aspectRatio:`${frameSize}/${frames[0]?.height||frameSize}`}}
             className="w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] rounded-xl shadow-2xl border-2 border-slate-800/90 [image-rendering:pixelated]"
           />
 
+          {curtain&&<div className="curtain-divider" style={{left:`${split*100}%`}}><button aria-label="Mover cortina" onClick={e=>e.stopPropagation()} onPointerDown={e=>{e.preventDefault();e.stopPropagation();e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!e.currentTarget.hasPointerCapture(e.pointerId))return;const rect=e.currentTarget.parentElement?.parentElement?.getBoundingClientRect();if(rect)setSplit(Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width)));}} onPointerUp={e=>e.currentTarget.releasePointerCapture(e.pointerId)} onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();e.stopPropagation();setSplit(v=>Math.max(0,Math.min(1,v+(e.key==='ArrowRight'?.02:-.02))));}}}>↔</button></div>}
           {/* SVG Vector Overlays */}
           <svg
             viewBox={`0 0 ${frameSize} ${frames[0]?.height || frameSize}`}
@@ -555,6 +557,12 @@ export function FrameViewer() {
 
       {curtain && <p className="viewer-caption">Cortina: {epochs[0]?.date.slice(0,10)} UTC (izquierda) / {epochs[epochs.length-1]?.date.slice(0,10)} UTC (derecha)</p>}
       {hunter && !realMode && <p className="viewer-caption">Cazador educativo: posición generada {frames.find(f=>f.epochIndex===currentEpoch)?.movingTargetPixel?.x.toFixed(1)}, {frames.find(f=>f.epochIndex===currentEpoch)?.movingTargetPixel?.y.toFixed(1)} px. No es detección automática.</p>}
+      <div className="comparison-rail"><div className="viewer-segmented-control" role="group" aria-label="Comparación temporal">
+       <button aria-pressed={blinkMode} disabled={epochs.length<2||!!error} onClick={()=>{setCurtain(false);spherexStore.toggleBlinkMode();}}>Parpadeo</button>
+       <button aria-pressed={curtain} disabled={epochs.length<2||!!error} onClick={()=>{spherexStore.stopPlayback();spherexStore.setMode('normal');setCurtain(!curtain);}}>Cortina</button>
+       {!realMode&&<button aria-pressed={hunter} onClick={()=>setHunter(!hunter)}>Cazador educativo</button>}
+      </div>{blinkMode&&<label>Velocidad<select aria-label="Velocidad de parpadeo" value={fps} onChange={e=>spherexStore.setFps(Number(e.target.value))}>{[1,2,3,4].map(n=><option key={n} value={n}>{n} Hz</option>)}</select></label>}</div>
+      {curtain&&<label className="curtain-position">Posición de cortina<input type="range" aria-label="División de cortina" min="0" max="1" step=".01" value={split} onChange={e=>setSplit(Number(e.target.value))}/></label>}
       <div className="temporal-controls">
         <div className="temporal-actions">
           <div className="playback-actions">
@@ -566,10 +574,12 @@ export function FrameViewer() {
             {(['normal', 'diff'] as const).map(m => <button key={m} disabled={!frames.length || !!error} aria-pressed={mode === m} onClick={() => {setCurtain(false);spherexStore.setMode(m);}}>{m === 'normal' ? text.normal : text.diff}</button>)}
           </div>
         </div>
+        <label className="timeline-scrubber">Fecha<input type="range" aria-label="Fecha de observación" min="0" max={Math.max(0,epochs.length-1)} step="1" value={currentEpoch} disabled={!epochs.length||!!error} onChange={e=>{spherexStore.stopPlayback();spherexStore.setCurrentEpoch(Number(e.target.value));}}/></label>
         <p className="active-date">Fecha activa: {epochs[currentEpoch]?.date.slice(0,10) || 'Sin observación'} UTC{mode === 'stack' ? ' · Apilado' : ''}</p>
         <div className="epoch-selector" role="group" aria-label="Fechas de observación">
           {epochs.map((ep, idx) => <button key={ep.epoch} disabled={!!error} aria-pressed={idx === currentEpoch} onClick={() => { spherexStore.stopPlayback(); spherexStore.setCurrentEpoch(idx); }}><span>Observación {idx + 1}</span><strong>{new Date(ep.date).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</strong></button>)}
         </div>
+        <div className="spectral-data-rail" aria-label="Detectores disponibles">{[...new Set(frames.map(f=>f.detector))].map(det=><button key={det} aria-label={`Detector ${det}`} aria-pressed={detectors[det-1]} disabled={realMode} title={`Detector ${det}`} onClick={()=>spherexStore.toggleDetector(det)} style={{background:['#6aa7ff','#4fd1a5','#ffd34f','#ff9a3c','#d44f6e','#b07cff'][det-1],opacity:detectors[det-1]?1:.25}}/>)}</div>
         <details className="viewer-advanced"><summary>Comparación avanzada, exportación e inspección</summary><div>
           <label><input type="checkbox" checked={curtain} onChange={e=>{spherexStore.stopPlayback();spherexStore.setMode('normal');setCurtain(e.target.checked);}} /> Cortina comparadora</label>
           {curtain && <label>Posición de cortina<input aria-label="Posición de cortina" type="range" min="0" max="1" step="0.01" value={split} onChange={e=>setSplit(Number(e.target.value))}/></label>}

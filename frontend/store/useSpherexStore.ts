@@ -245,6 +245,7 @@ export const spherexStore = {
       },
       fov: isNaN(fov) ? 5.0 : Math.min(30, Math.max(1, fov)),
       currentEpoch: Math.max(0, Number.parseInt(p.get('ep') || '0', 10) || 0),
+      stretch: {...state.stretch,fn:activeIsReal?'linear':'asinh'},
       mode: ['normal', 'diff', 'stack'].includes(mode) ? mode : 'normal',
       detectors,
       sumDetectors: p.get('sum') === '1',

@@ -79,16 +79,24 @@ async def main():
                         await call('Emulation.setDeviceMetricsOverride', {'width':w,'height':h,'deviceScaleFactor':1,'mobile':False})
                         await asyncio.sleep(.3)
                         assert await js('document.documentElement.scrollWidth <= window.innerWidth'), (mode,label)
+                        assert await js("(()=>{const image=document.querySelector('.viewer-canvas-col').getBoundingClientRect();const info=document.querySelector('.viewer-info-col').getBoundingClientRect();return innerWidth>=1024?info.left>=image.right-1:info.top>=image.bottom-1;})()")
+                        assert await js("document.querySelector('.viewer-viewport canvas').getBoundingClientRect().width > (innerWidth>=1024?400:280)")
+                        if label=='desktop': assert await js("document.querySelector('header').getBoundingClientRect().height<=60")
                         metrics = await call('Page.getLayoutMetrics')
                         bounds = metrics['cssContentSize']
                         data = await call('Page.captureScreenshot', {'format':'png', 'captureBeyondViewport':True, 'clip':{**bounds, 'scale':1}})
-                        dest=Path(__file__).resolve().parents[2]/'docs/assets'/f'integration-{mode}-{label}.png'
+                        dest=Path(__file__).resolve().parents[2]/'docs/assets'/f'reference-layout-{mode}-{label}.png'
                         dest.write_bytes(base64.b64decode(data['data']))
                     await js("document.querySelector('.advanced-tools').open=true")
-                    assert await js("document.querySelector('.advanced-tools').innerText.includes("+json.dumps('2026W' if mode=='real' else 'Modo Detective')+")")
+                    await js("document.querySelector('.technical-details').open=true")
+                    assert await js("document.querySelector('.viewer-info-col').innerText.includes("+json.dumps('2026W' if mode=='real' else 'Modo Detective')+")")
                     await js("document.querySelector('.viewer-advanced').open=true")
                     await js("document.querySelector('.viewer-advanced input[type=checkbox]').click()")
                     assert await js("document.body.innerText.includes('Cortina:')")
+                    await js("document.querySelector('.curtain-divider button').focus()")
+                    await call('Input.dispatchKeyEvent', {'type':'keyDown','key':'ArrowRight','code':'ArrowRight'})
+                    await asyncio.sleep(.1)
+                    assert await js("parseFloat(document.querySelector('.curtain-divider').style.left)>50")
                     await js("document.querySelector('.viewer-advanced input[type=checkbox]').click()")
                     if mode=='mock':
                         await js("[...document.querySelectorAll('summary')].find(s=>s.textContent.includes('Espectro interactivo')).click()")
@@ -130,6 +138,21 @@ async def main():
                 await wait("document.querySelector('canvas')?.width===256 && !document.querySelector('header')")
                 assert await js("!document.querySelector('header')")
                 print('PASS synthetic embed URL')
+                await call('Page.navigate', {'url':'http://localhost:3000/?api=real'})
+                await wait("document.querySelector('canvas')?.width===30 && !!document.querySelector('.back-target')")
+                await js("document.querySelector('.back-target').click()")
+                await wait("!document.querySelector('.reference-header')")
+                assert await js("document.body.innerText.includes('M101')")
+                print('PASS reference landing navigation')
+                for label,w,h in [('desktop',1440,900),('mobile',390,844)]:
+                    await call('Emulation.setDeviceMetricsOverride', {'width':w,'height':h,'deviceScaleFactor':1,'mobile':False})
+                    await call('Page.navigate', {'url':'http://localhost:3001/?api=mock'})
+                    await wait("!!document.querySelector('.viewer-shell canvas')")
+                    await asyncio.sleep(1)
+                    metrics=await call('Page.getLayoutMetrics')
+                    data=await call('Page.captureScreenshot', {'format':'png','captureBeyondViewport':True,'clip':{**metrics['cssContentSize'],'scale':1}})
+                    (Path(__file__).resolve().parents[2]/'docs/assets'/f'original-reference-{label}.png').write_bytes(base64.b64decode(data['data']))
+                print('PASS source reference screenshots')
         finally:
             try:
                 os.killpg(proc.pid, signal.SIGTERM)

@@ -150,3 +150,46 @@ change SPHEREx frame origin. The hunter is a generated-position teaching aid,
 not new source analysis. Mobile controls require scrolling. Calibrated real
 spectra, measured motion, arbitrary real fields and precision photometry remain
 out of scope.
+
+## Ajuste de fidelidad visual — 2026-11-14
+
+Por solicitud posterior del usuario, la distribución anterior de M3.5 se
+sustituyó por la estructura del frontend fuente, no solo su paleta:
+
+- Cabecera de 50 px en escritorio: regreso a portada, objetivo, búsqueda plegada,
+  vecindario, idioma, compartir y menú compacto de origen/acciones secundarias.
+- `viewer-shell` y `viewer-body` originales: cielo a la izquierda, ficha del campo
+  a la derecha, con tabla de métricas y desplegables. En móvil se apilan con
+  desplazamiento de página, evitando bloquear la ficha en un panel demasiado bajo.
+- Selector segmentado Parpadeo/Cortina, Cazador solo educativo, control temporal
+  con fechas seleccionables y Diferencia. Cortina incluye divisor arrastrable y
+  control por teclado. Se preservan zoom, orientación, máscaras y píxeles nativos.
+- En M101 la ficha muestra separación calculada desde MJD, detector y longitud
+  de onda disponibles. Los ejemplos simulados conservan su ficha educativa y reto.
+- Se usa la hoja de estilos completa del repositorio fuente con adaptaciones de
+  integración. También se respeta su selección de paleta según preferencia de
+  color del navegador; las capturas de comparación usan el mismo entorno.
+- La portada original incluye acceso explícito a M101 real y a ejemplos simulados;
+  se retiró el botón provisional que antes aparecía fuera de ella. M101 real sigue
+  siendo la entrada sin parámetros.
+
+La simulación abre con estiramiento asinh, para que no herede por accidente el
+estiramiento lineal inicial del conjunto real. Los valores científicos no cambian.
+Las funciones de carga, caché, validación y el contrato HTTP permanecen intactos.
+
+Verificación ejecutada para este ajuste: TypeScript, lint sin errores (advertencia
+preexistente de fuente), build de producción, 47 pruebas científicas y pruebas
+frontend de píxeles/caché/cancelación. La prueba Chromium se amplió para comprobar
+columnas en escritorio, orden vertical móvil, cabecera compacta, tamaño visible
+del canvas, Cortina por teclado y navegación a portada, además del flujo real/mock,
+Blink/Diferencia, máscaras, exportación, idiomas, errores y embed ya existente.
+
+Capturas de la versión adaptada:
+`assets/reference-layout-{real,mock}-{desktop,mobile}.png`.
+Capturas del frontend fuente ejecutado localmente en :3001:
+`assets/original-reference-{desktop,mobile}.png`.
+
+Para repetir la captura comparativa, ejecutar además desde el frontend fuente:
+`node node_modules/next/dist/bin/next dev --port 3001`, y después la prueba
+`server/scripts/test_frontend_integration.py` con los servicios :3000 y :8000 activos.
+No se alteró el árbol de archivos del repositorio fuente.

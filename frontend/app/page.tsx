@@ -5,7 +5,7 @@ import {Header} from '../components/Header';
 import {FrameViewer} from '../components/FrameViewer';
 import {ControlPanel} from '../components/ControlPanel';
 import {MetadataPanel} from '../components/MetadataPanel';
-import {ObservatoryContext,ComparisonExplanation,InlineGuide,AdvancedContext} from '../components/ObservatoryContext';
+import {ObservatoryContext,ComparisonExplanation,AdvancedContext,EducationalFieldTools} from '../components/ObservatoryContext';
 import {ExplorationTools} from '../components/ExplorationTools';
 import {EmbedModal} from '../components/EmbedModal';
 import {KeyboardHelpModal} from '../components/KeyboardHelpModal';
@@ -133,11 +133,16 @@ export default function Home(){
    if(e.key==='?')setHelp(true);
   };window.addEventListener('keydown',keyboard);return()=>{clearTimeout(timer);window.removeEventListener('keydown',keyboard);};
  },[]);
- const select=(id:string)=>{const aliases:Record<string,string>={wise:'wise0855',indi:'eps_indi_b',rw:'rw_aur',rdra:'r_dra'};location.assign(new URL(`?api=mock&target=${aliases[id]||id}&lang=${locale}`,location.origin).href);};
+ const select=(id:string)=>{if(id==='m101'){location.assign(new URL(`?api=real&lang=${locale}`,location.origin).href);return;}const aliases:Record<string,string>={wise:'wise0855',indi:'eps_indi_b',rw:'rw_aur',rdra:'r_dra'};location.assign(new URL(`?api=mock&target=${aliases[id]||id}&lang=${locale}`,location.origin).href);};
  if(state.isEmbed)return <main className="observatory-main"><FrameViewer/></main>;
- if(landing)return <><button onClick={()=>setLanding(false)}>Abrir observatorio · M101 real / Simulación</button><LandingHero objects={OBJ} onSelect={select} onSearch={q=>{const p=PRESET_TARGETS.find(p=>p.name?.toLowerCase().includes(q.toLowerCase()));if(p)select(p.id);}} isSearching={false} searchMessage="Ejemplos educativos: imágenes y espectros simulados" locale={locale}/></>;
- return <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100"><Header onOpenEmbed={()=>setEmbed(true)} onOpenHelp={()=>setHelp(true)} onSwitchView={()=>setLanding(true)}/>
- <main className="observatory-main"><ObservatoryContext/><FrameViewer/><InlineGuide/><ComparisonExplanation/>
- <details className="advanced-tools"><summary>{text.advanced}</summary><div className="advanced-grid"><ControlPanel/><div><MetadataPanel/><AdvancedContext/><ExplorationTools/></div></div></details></main>
- <footer className="observatory-footer">SPHEREx Time Machine · NASA / Caltech / JPL / IPAC · {text.limit}</footer><EmbedModal isOpen={embed} onClose={()=>setEmbed(false)}/><KeyboardHelpModal isOpen={help} onClose={()=>setHelp(false)}/></div>;
+ if(landing)return <LandingHero objects={{...OBJ,m101:{...OBJ.wise,id:'m101',n:'M101 · Datos reales',tag:'Galaxia del Molinete',hook:'Compara dos observaciones auténticas de SPHEREx.',badge:'Datos reales',f:[['Origen','NASA/IPAC IRSA'],['Épocas','2']],pm:[0,0]}}} onSelect={select} onSearch={q=>{const p=PRESET_TARGETS.find(p=>p.name?.toLowerCase().includes(q.toLowerCase()));if(p)select(p.id);}} onOpenConeSearch={()=>{setLanding(false);setTimeout(()=>window.dispatchEvent(new Event('spherex-neighborhood')),0);}} isSearching={false} searchMessage="M101: datos reales. Los demás ejemplos son simulaciones educativas." locale={locale}/>;
+ return <div className="reference-app"><Header onOpenEmbed={()=>setEmbed(true)} onOpenHelp={()=>setHelp(true)} onSwitchView={()=>setLanding(true)}/>
+ <main className="viewer-shell"><div className="viewer-body"><div className="viewer-canvas-col"><FrameViewer/></div>
+ <aside className="viewer-info-col"><ObservatoryContext facts={Object.values(OBJ).find(o=>Math.abs(o.ra-state.target.ra)<.01&&Math.abs(o.dec-state.target.dec)<.01)?.f}/><EducationalFieldTools/>
+ <ComparisonExplanation/>
+ <details className="advanced-tools"><summary>{text.advanced}</summary><ControlPanel/></details>
+ <ExplorationTools/>
+ <details className="technical-details"><summary>Detalles técnicos y procedencia</summary><MetadataPanel/><AdvancedContext/></details>
+ <footer className="reference-footer">SPHEREx Time Machine · NASA / Caltech / JPL / IPAC</footer>
+ </aside></div></main><EmbedModal isOpen={embed} onClose={()=>setEmbed(false)}/><KeyboardHelpModal isOpen={help} onClose={()=>setHelp(false)}/></div>;
 }

@@ -129,3 +129,17 @@ checks executed successfully. Both direct/proxied health and M101 endpoints retu
 real cached data. See `docs/frontend-integration.md` for attribution, commands,
 captures and limits, including partial English coverage and unverified live
 catalog services. Earlier milestone sections are historical snapshots.
+
+### Fidelidad al frontend de pruebaSpaceApps
+
+La interfaz adopta ahora la distribución del frontend fuente: cabecera compacta,
+visor y controles a la izquierda, ficha con métricas/desplegables a la derecha,
+y apilado móvil. La portada no tiene el botón provisional externo; incluye M101
+real y ejemplos explícitamente simulados. M101 real sigue abriendo por defecto.
+Cortina se puede arrastrar o mover por teclado. Se preservan backend, contrato,
+máscaras, épocas disponibles y procedencia científica.
+
+TypeScript, lint/build, 47 pruebas backend y pruebas frontend pasan. Se realizó
+comparación Chromium con ambos frontends ejecutados y capturas de escritorio/móvil.
+Ver `docs/frontend-integration.md`, sección de fidelidad visual, y
+`docs/assets/reference-layout-*.png` / `original-reference-*.png`.

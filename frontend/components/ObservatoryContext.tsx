@@ -1,14 +1,18 @@
 "use client";
 import React, { useEffect, useState } from 'react';
-import { useSpherexStore } from '../store/useSpherexStore';
+import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
 import { pixelToCelestial } from '../lib/wcs';
 import { useLocale } from './useLocale';
 import { useDataMode } from './useDataMode';
-export function ObservatoryContext() {
+function epochsSeparation(frames: {mjd:number}[]) {const values=frames.map(f=>f.mjd);return values.length?Math.max(...values)-Math.min(...values):null;}
+export function ObservatoryContext({facts}: {facts?:[string,string][]}) {
   const { mode, frames, currentEpoch, detectors, target } = useSpherexStore();
   const real = useDataMode();
   const frame = frames.find(f => f.epochIndex === currentEpoch && detectors[f.detector - 1]);
-  return <section className="field-heading"><div><h2>{real ? 'M101 — Galaxia del Molinete' : target.name}</h2><p>{real ? 'Dos observaciones de la misma región del cielo' : 'Experiencia educativa con imágenes, movimiento y espectros generados'}</p></div>{frame && <p>Detector {frame.detector} · ≈ {frame.band.lambda_um.toLocaleString('es', { maximumFractionDigits: 4 })} µm · {mode === 'stack' ? 'Promedio de observaciones' : 'Infrarrojo cercano'}</p>}</section>;
+  const separation=epochsSeparation(frames);
+  return <section className="field-heading"><h1>{real ? 'M101 — Galaxia del Molinete' : target.name}</h1><p>{real?'La misma región del cielo, observada en dos fechas. Compara imágenes infrarrojas auténticas de SPHEREx.':target.description||'Exploración educativa con imágenes generadas.'}</p>
+  {!real&&facts?<table className="metric-table"><thead><tr>{facts.map(([label])=><th key={label}>{label}</th>)}</tr></thead><tbody><tr>{facts.map(([label,value])=><td key={label}>{value}</td>)}</tr></tbody></table>:<table className="metric-table"><thead><tr><th>{real?'Separación':'Épocas'}</th><th>Detector</th><th>Longitud de onda</th></tr></thead><tbody><tr><td>{real?(separation===null?'—':`${separation.toLocaleString('es',{maximumFractionDigits:2})} días`):new Set(frames.map(f=>f.epochIndex)).size}</td><td>{frame?frame.detector:'—'}</td><td>{frame?`≈ ${frame.band.lambda_um.toLocaleString('es',{maximumFractionDigits:3})} µm`:'—'}</td></tr></tbody></table>}
+  <small>{real?'Fuente: NASA/IPAC IRSA · SPHEREx QR3':'Simulación · Sin mediciones espectrales reales'}{mode==='stack'?' · Apilado':''}</small></section>;
 }
 export function ComparisonExplanation() {
   const {text}=useLocale();
@@ -29,3 +33,5 @@ export function AdvancedContext() {
   const coordinates = selectedPixel ? pixelToCelestial(selectedPixel.x, selectedPixel.y, wcs) : undefined;
   return <section><h3>Coordenadas y validez</h3><p>Campo de visión: {fov}′</p><p>Centro ICRS: {wcs.crval.map(n => n.toFixed(5)).join(', ')}° · Escala: {(wcs.cdelt * 3600).toFixed(3)}″/px</p><p>{hoverCoords ? `RA ${hoverCoords.ra.toFixed(5)}° · Dec ${hoverCoords.dec.toFixed(5)}°` : selectedPixel ? `Píxel seleccionado: ${selectedPixel.x}, ${selectedPixel.y} · RA ${coordinates?.ra.toFixed(5)}° · Dec ${coordinates?.dec.toFixed(5)}°` : 'Selecciona un píxel para inspeccionar su posición.'}</p>{real && <p>Los píxeles excluidos permanecen enmascarados en todas las vistas. No hay espectros calibrados de 102 bandas ni catálogos en vivo en este conjunto.</p>}<details><summary>Procedencia y procesamiento</summary><pre className="provenance-json">{JSON.stringify(provenance || { origen: "Simulación educativa" }, null, 2)}</pre></details><a href={`https://aladin.cds.unistra.fr/AladinLite/?target=${wcs.crval[0]}%20${wcs.crval[1]}`} target="_blank" rel="noopener noreferrer">Abrir contexto externo en Aladin</a></section>;
 }
+
+export function EducationalFieldTools(){const real=useDataMode();const {detective,overlays}=useSpherexStore();if(real)return null;return <section className="educational-field-tools"><button className="btn-primary" onClick={()=>spherexStore.setDetective(!detective)}>{detective?'Salir del reto educativo':'Reto Detective: ¿Dónde está?'}</button><label>Resaltar lo que cambia<input type="checkbox" checked={overlays.annotations} onChange={()=>spherexStore.toggleOverlay('annotations')}/></label><small>Ejercicio con posiciones generadas; no es una detección real.</small></section>;}
