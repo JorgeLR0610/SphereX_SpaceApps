@@ -99,7 +99,7 @@ export const isRealApiActive = (): boolean => {
     if (p.get('api') === 'real') return true;
     if (p.get('api') === 'mock') return false;
   }
-  return process.env.NEXT_PUBLIC_USE_REAL_API === 'true';
+  return process.env.NEXT_PUBLIC_USE_REAL_API !== 'false';
 };
 
 // Dispatcher API dynamically routes to Real or Mock depending on environment or URL parameter

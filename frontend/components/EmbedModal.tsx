@@ -1,7 +1,9 @@
 'use client';
 
+import { useDialogFocus } from './useDialogFocus';
 import React, { useState } from 'react';
 import { useSpherexStore } from '../store/useSpherexStore';
+import { isRealApiActive } from '../lib/apiAdapter';
 import { CodeIcon, CheckIcon } from './Icons';
 
 interface EmbedModalProps {
@@ -16,10 +18,11 @@ export function EmbedModal({ isOpen, onClose }: EmbedModalProps) {
   const [height, setHeight] = useState('600');
   const [copied, setCopied] = useState(false);
 
+  const dialogRef = useDialogFocus(isOpen, onClose);
   if (!isOpen) return null;
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://spherex-timemachine.org';
-  const embedUrl = `${origin}/?ra=${target.ra.toFixed(4)}&dec=${target.dec.toFixed(4)}&fov=${fov}&mode=${mode}&ep=${currentEpoch}&embed=1`;
+  const embedUrl = `${origin}/?api=${isRealApiActive() ? "real" : "mock"}&ra=${target.ra.toFixed(4)}&dec=${target.dec.toFixed(4)}&fov=${fov}&mode=${mode}&ep=${currentEpoch}&embed=1`;
   const iframeCode = `<iframe \n  src="${embedUrl}" \n  width="${width}" \n  height="${height}" \n  frameborder="0" \n  allow="accelerometer; autoplay; clipboard-write; encrypted-media" \n  allowfullscreen\n></iframe>`;
 
   const copyCode = () => {
@@ -29,7 +32,7 @@ export function EmbedModal({ isOpen, onClose }: EmbedModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Insertar visor" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
       <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">

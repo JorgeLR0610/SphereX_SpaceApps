@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useDataMode } from '../components/useDataMode';
 import { resolveTargetName } from '../lib/sesame';
 import { formatSexagesimal } from '../lib/wcs';
 import { sound } from '../lib/sound';
@@ -11,12 +12,10 @@ import { GuidedTour } from '../components/GuidedTour';
 import { ConeSearchPanel } from '../components/ConeSearchPanel';
 import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
 import { Header } from '../components/Header';
-import { ConceptHero } from '../components/ConceptHero';
-import { TargetExplainer } from '../components/TargetExplainer';
+import { ObservatoryContext, ComparisonExplanation, InlineGuide, AdvancedContext } from '../components/ObservatoryContext';
 import { FrameViewer } from '../components/FrameViewer';
 import { ControlPanel } from '../components/ControlPanel';
 import { SpectrumPanel } from '../components/SpectrumPanel';
-import { SkyContext } from '../components/SkyContext';
 import { MetadataPanel } from '../components/MetadataPanel';
 import { EmbedModal } from '../components/EmbedModal';
 import { KeyboardHelpModal } from '../components/KeyboardHelpModal';
@@ -147,6 +146,7 @@ function rng(seed: number) {
 }
 
 export default function Home() {
+  const realMode = useDataMode();
   // Navigation: 'observatory' (Momento 2 & 3 Científico) vs 'landing' (Momento 1) vs 'viewer' (Versión Simplificada)
   const [view, setView] = useState<'observatory' | 'landing' | 'viewer'>('observatory');
 
@@ -195,18 +195,20 @@ export default function Home() {
   useEffect(() => {
     if (view !== 'observatory') return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+      if ((e.target as HTMLElement).closest('input, textarea, select, button, summary, [contenteditable], [role=dialog]')) {
         return;
       }
 
       if (e.code === 'Space') {
         e.preventDefault();
-        spherexStore.setPlaying(!spherexStore.getState().playing);
+        spherexStore.toggleBlinkMode();
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
+        spherexStore.stopPlayback();
         spherexStore.nextEpoch();
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
+        spherexStore.stopPlayback();
         spherexStore.prevEpoch();
       } else if (e.key === 'd' || e.key === 'D') {
         const curr = spherexStore.getState().mode;
@@ -822,50 +824,16 @@ export default function Home() {
           onSwitchView={() => setView('landing')}
         />
 
-        <main className="flex-1 flex flex-col gap-4 p-4 max-w-[1600px] w-full mx-auto">
-          <section>
-            <ConceptHero />
-          </section>
-
-          <section>
-            <TargetExplainer />
-          </section>
-
-          <section className="flex flex-col lg:flex-row gap-4 min-h-[500px]">
-            <FrameViewer />
-            <ControlPanel />
-          </section>
-
-          <section id="spectrum-section" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <SkyContext />
-            <SpectrumPanel />
-          </section>
-
-          <section>
-            <MetadataPanel />
-          </section>
+        <main className="observatory-main">
+          <ObservatoryContext />
+          <FrameViewer />
+          <InlineGuide />
+          <ComparisonExplanation />
+          <details className="advanced-tools"><summary>Herramientas avanzadas</summary>
+            <div className="advanced-grid"><ControlPanel /><div><MetadataPanel /><AdvancedContext />{!realMode && <SpectrumPanel />}</div></div>
+          </details>
         </main>
-
-        <footer className="w-full py-4 px-6 border-t border-slate-900 bg-slate-950/60 text-center text-xs text-slate-500 font-mono flex flex-wrap items-center justify-between gap-3">
-          <div>
-            SPHEREx Time Machine · Diseñado para la misión NASA SPHEREx (Caltech / JPL / IPAC)
-          </div>
-          <div className="flex items-center gap-4 text-[11px]">
-            <span>Datos: NASA IPAC IRSA SPHEREx QR3 & Simulación</span>
-            <button
-              onClick={() => setView('landing')}
-              className="hover:text-cyan-400 underline underline-offset-2"
-            >
-              Portada Educativa
-            </button>
-            <button
-              onClick={() => setIsHelpOpen(true)}
-              className="hover:text-cyan-400 underline underline-offset-2"
-            >
-              Guía de atajos (?)
-            </button>
-          </div>
-        </footer>
+        <footer className="observatory-footer">SPHEREx Time Machine · NASA / Caltech / JPL / IPAC · Comparación visual, sin detección automática</footer>
 
         <EmbedModal isOpen={isEmbedOpen} onClose={() => setIsEmbedOpen(false)} />
         <KeyboardHelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />

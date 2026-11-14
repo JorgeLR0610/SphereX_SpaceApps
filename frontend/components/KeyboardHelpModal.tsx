@@ -1,6 +1,8 @@
 'use client';
 
+import { useDialogFocus } from './useDialogFocus';
 import React from 'react';
+import { isRealApiActive } from '../lib/apiAdapter';
 import { HelpIcon, InfoIcon } from './Icons';
 
 interface KeyboardHelpModalProps {
@@ -9,6 +11,7 @@ interface KeyboardHelpModalProps {
 }
 
 export function KeyboardHelpModal({ isOpen, onClose }: KeyboardHelpModalProps) {
+  const dialogRef = useDialogFocus(isOpen, onClose);
   if (!isOpen) return null;
 
   const shortcuts = [
@@ -18,11 +21,11 @@ export function KeyboardHelpModal({ isOpen, onClose }: KeyboardHelpModalProps) {
     { key: 'S', desc: 'Alternar Modo Apilado' },
     { key: 'M', desc: 'Alternar Modo Detective 🕵️' },
     { key: '1 – 6', desc: 'Activar / Desactivar detector infrarrojo correspondiente' },
-    { key: '+ / -', desc: 'Acercar / Alejar recorte' },
+    { key: 'B', desc: 'Activar / Pausar parpadeo' },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Atajos de teclado" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
       <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
@@ -43,7 +46,7 @@ export function KeyboardHelpModal({ isOpen, onClose }: KeyboardHelpModalProps) {
             Atajos Rápidos de Teclado
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {shortcuts.map((sc, idx) => (
+            {shortcuts.filter(sc => !isRealApiActive() || !['M', '1 – 6'].includes(sc.key)).map((sc, idx) => (
               <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800 text-xs">
                 <span className="text-slate-300">{sc.desc}</span>
                 <kbd className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-[11px] font-bold text-cyan-300">
@@ -61,7 +64,7 @@ export function KeyboardHelpModal({ isOpen, onClose }: KeyboardHelpModalProps) {
             <span>¿Por qué se ve un par azul / rojo en Modo Diferencia?</span>
           </div>
           <p className="text-[11px] text-slate-400">
-            Al restar la imagen de una época de otra (I_actual - I_ref), las miles de estrellas fijas del fondo se anulan casi por completo (&asymp; 0). Sin embargo, un objeto con movimiento propio o un asteroide habrá cambiado de posición: deja una caída de flujo negativa (<span className="text-cyan-400 font-bold">azul</span>) en la posición original y un exceso positivo (<span className="text-rose-400 font-bold">rojo</span>) en la nueva. Este dipolo revela al instante cuerpos dinámicos invisibles a simple vista.
+            Azul y rojo muestran diferencias negativas y positivas respecto a la referencia. También pueden deberse a ruido, fondo o respuesta instrumental. Este visor no confirma movimiento ni descubrimientos.
           </p>
         </div>
 

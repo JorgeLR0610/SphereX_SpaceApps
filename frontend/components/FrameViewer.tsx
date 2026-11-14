@@ -2,20 +2,14 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
+import { useDataMode } from './useDataMode';
 import { getColormapLut, applyStretch } from '../lib/colormaps';
 import { pixelToCelestial, computeProperMotionDisplacement } from '../lib/wcs';
 import { getCatalogMarkers } from '../lib/mockData';
 import { createAnimatedGif } from '../lib/gifEncoder';
-import { 
-  EyeIcon, 
-  DownloadIcon, 
-  PlayIcon,
-  PauseIcon,
-  SkipBackIcon,
-  SkipForwardIcon
-} from './Icons';
 
 export function FrameViewer() {
+  const realMode = useDataMode();
   const {
     frames,
     epochs,
@@ -33,7 +27,6 @@ export function FrameViewer() {
     detectiveTarget,
     selectedObjectCallout,
     wcs,
-    fov,
     selectedPixel,
     isLoading,
     error,
@@ -72,9 +65,9 @@ export function FrameViewer() {
       const numEpochs = state.epochs.length || 2;
       const maxEp = Math.max(1, numEpochs - 1);
       spherexStore.setCurrentEpoch(curr === 0 ? maxEp : 0);
-    }, 550); // ~1.8 Hz classic blink rate
+    }, Math.max(125, Math.round(1000 / fps))); // ~1.8 Hz classic blink rate
     return () => clearInterval(interval);
-  }, [blinkMode]);
+  }, [blinkMode, fps]);
 
   // Trigger celebratory banner animation when target is found in Detective Mode
   useEffect(() => {
@@ -153,7 +146,11 @@ export function FrameViewer() {
       refFrames.forEach(f => {
         for (let i = 0; i < numPixels; i++) refCombined[i] += f.pixelData[i];
       });
-      for (let i = 0; i < numPixels; i++) refCombined[i] /= refFrames.length;
+      for (let i = 0; i < numPixels; i++) if (diffRef === 'median') {
+          const values = refFrames.map(f => f.pixelData[i]).sort((a,b) => a-b);
+          const mid = Math.floor(values.length / 2);
+          refCombined[i] = values.length % 2 ? values[mid] : (values[mid-1] + values[mid]) / 2;
+        } else refCombined[i] /= refFrames.length;
 
       const diffBuffer = new Float32Array(numPixels);
       for (let i = 0; i < numPixels; i++) {
@@ -210,7 +207,7 @@ export function FrameViewer() {
 
     if (mode === 'diff') {
       // Symmetrical difference stretch around 0
-      const diffRange = Math.max(25, stretch.max * 0.45);
+      const diffRange = Math.max(0.000001, (stretch.max - stretch.min) * 0.45);
       for (let i = 0; i < buffer.length; i++) {
         if (validMask && validMask[i] === 0) {
           // Muted slate blue #2b3d5b (r: 43, g: 61, b: 91)
@@ -346,8 +343,9 @@ export function FrameViewer() {
         const d32 = new Uint32Array(imgData.data.buffer);
 
         if (mode === 'diff') {
-          const diffRange = Math.max(25, stretch.max * 0.45);
+          const diffRange = Math.max(0.000001, (stretch.max - stretch.min) * 0.45);
           for (let i = 0; i < buf.length; i++) {
+            if (frames.find(f => f.epochIndex === ep)?.validMask?.[i] === 0) { d32[i] = (255 << 24) | (91 << 16) | (61 << 8) | 43; continue; }
             const val = buf[i];
             const norm = Math.max(0, Math.min(1, (val + diffRange) / (2 * diffRange)));
             const c = lut[Math.floor(norm * 255)] || lut[128];
@@ -355,6 +353,7 @@ export function FrameViewer() {
           }
         } else {
           for (let i = 0; i < buf.length; i++) {
+            if (frames.find(f => f.epochIndex === ep)?.validMask?.[i] === 0) { d32[i] = (255 << 24) | (91 << 16) | (61 << 8) | 43; continue; }
             const s = applyStretch(buf[i], stretch.min, stretch.max, stretch.fn);
             const c = lut[Math.floor(Math.max(0, Math.min(1, s)) * 255)] || lut[0];
             d32[i] = (255 << 24) | (c.b << 16) | (c.g << 8) | c.r;
@@ -362,11 +361,6 @@ export function FrameViewer() {
         }
 
         ctx.putImageData(imgData, 0, 0);
-
-        // Stamp epoch label
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText(`Época ${ep + 1} (${epochs[ep].date.substring(0, 10)})`, 10, 20);
 
         gifFrames.push({
           imageData: ctx.getImageData(0, 0, size, size),
@@ -421,51 +415,10 @@ export function FrameViewer() {
       ref={containerRef}
       className="relative flex-1 flex flex-col bg-slate-950 overflow-hidden border border-slate-800 rounded-2xl select-none shadow-2xl"
     >
-      {/* Top Banner explaining current visualization mode */}
-      <div className={`px-4 py-2 border-b flex items-center justify-between text-xs font-mono transition-colors ${
-        isRealData
-          ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
-          : mode === 'diff' 
-          ? 'bg-rose-950/40 border-rose-800/60 text-rose-300'
-          : mode === 'stack'
-          ? 'bg-purple-950/40 border-purple-800/60 text-purple-300'
-          : 'bg-slate-900/90 border-slate-800 text-slate-300'
-      }`}>
-        <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${isRealData ? 'bg-emerald-400' : 'bg-cyan-400'} animate-ping`} />
-          <span className="font-bold">
-            {isRealData
-              ? mode === 'diff'
-                ? 'COMPARACIÓN DE ÉPOCAS REALES: Resta fotométrica directa entre observaciones SPHEREx QR3 de M101.'
-                : 'OBSERVACIÓN REAL SPHEREx: Región M101 a 1.49 µm (NASA SPHEREx Quick Release 3).'
-              : mode === 'diff'
-              ? 'FILTRO DE DIFERENCIA: Las estrellas fijas desaparecen. Los pares azul/rojo indican movimiento.'
-              : mode === 'stack'
-              ? 'APILADO TOTAL: 4 épocas sumadas para revelar objetos infrarrojos ultra tenues.'
-              : 'CIELO NATURAL: Observa cómo el punto fucsia salta entre fechas mientras el fondo está quieto.'}
-          </span>
-        </div>
-
-        {/* Quick Mode Indicator */}
-        <div className="flex items-center gap-2">
-          {isRealData ? (
-            <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-600/40 text-[11px]">
-              D2 · 30×30 px · 37.7d
-            </span>
-          ) : mode === 'diff' ? (
-            <div className="flex items-center gap-2 text-[11px] bg-slate-950/70 px-2 py-0.5 rounded border border-rose-500/40 font-bold">
-              <span className="text-cyan-400">🔵 Posición 2025</span>
-              <span>➔</span>
-              <span className="text-rose-400">🔴 Posición 2027</span>
-            </div>
-          ) : null}
-          <span className="text-slate-500">FOV: {fov}&apos;</span>
-        </div>
-      </div>
-
+      <div className="viewer-caption">{realMode ? 'SPHEREx QR3 · ' : 'Simulación · '}{epochs.map(e => e.date.slice(0,10)).join(' / ')} · UTC</div>
       {/* Main Viewport Container */}
       <div 
-        className="relative flex-1 flex items-center justify-center min-h-[460px] overflow-hidden bg-slate-950"
+        className="relative flex-1 flex items-center justify-center viewer-viewport min-h-[300px] overflow-hidden bg-slate-950"
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
@@ -785,130 +738,28 @@ export function FrameViewer() {
           <button onClick={() => { setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }} title="Restablecer Vista" className="w-8 h-8 rounded-lg bg-slate-900/90 border border-slate-700 hover:bg-slate-800 text-slate-300 text-[10px] font-mono flex items-center justify-center shadow-md">
             1x
           </button>
-          <button onClick={() => spherexStore.toggleOverlay('annotations')} title={overlays.annotations ? 'Ocultar Etiquetas' : 'Mostrar Etiquetas'} className={`w-8 h-8 rounded-lg border flex items-center justify-center shadow-md transition-colors ${overlays.annotations ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400' : 'bg-slate-900/90 text-slate-400 border-slate-700 hover:text-white'}`}>
-            <EyeIcon size={15} />
-          </button>
-          <button onClick={downloadSnapshot} title="Descargar Fotograma PNG" className="w-8 h-8 rounded-lg bg-slate-900/90 border border-slate-700 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center shadow-md">
-            <DownloadIcon size={15} />
-          </button>
-          <button onClick={exportAnimatedGifAction} disabled={isExportingGif} title="Descargar GIF Animado" className="w-8 h-8 rounded-lg bg-pink-950/80 border border-pink-500/50 hover:bg-pink-900/80 text-pink-300 flex items-center justify-center shadow-md disabled:opacity-50">
-            {isExportingGif ? <div className="w-3.5 h-3.5 border-2 border-pink-400 border-t-transparent rounded-full animate-spin" /> : <span className="text-[10px] font-mono font-bold">GIF</span>}
-          </button>
         </div>
       </div>
 
-      {/* Integrated Timeline & Player Bar (Directly below the Canvas!) */}
-      <div className="p-3 bg-slate-900/90 border-t border-slate-800 flex flex-col gap-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Main Playback Buttons */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => spherexStore.prevEpoch()}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
-              title="Fotograma Anterior"
-            >
-              <SkipBackIcon size={16} />
-            </button>
-
-            <button
-              onClick={() => spherexStore.setPlaying(!playing)}
-              className={`px-4 py-2 rounded-xl font-extrabold flex items-center gap-2 transition-all shadow-lg text-xs uppercase tracking-wider ${
-                playing
-                  ? 'bg-amber-500 text-slate-950 shadow-amber-500/20'
-                  : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-cyan-500/20'
-              }`}
-            >
-              {playing ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
-              <span>{playing ? 'Pausar' : 'Reproducir Movimiento'}</span>
-            </button>
-
-            <button
-              onClick={() => spherexStore.nextEpoch()}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
-              title="Fotograma Siguiente"
-            >
-              <SkipForwardIcon size={16} />
-            </button>
+      <div className="temporal-controls">
+        <div className="temporal-actions">
+          <div className="playback-actions">
+            <button aria-label="Observación anterior" disabled={isLoading || !epochs.length || !!error} onClick={() => { spherexStore.stopPlayback(); spherexStore.prevEpoch(); }}>←</button>
+            <button className="primary-action" disabled={isLoading || epochs.length < 2 || !!error} onClick={() => spherexStore.toggleBlinkMode()}>{blinkMode ? 'Pausar parpadeo' : 'Activar parpadeo'}</button>
+            <button aria-label="Observación siguiente" disabled={isLoading || !epochs.length || !!error} onClick={() => { spherexStore.stopPlayback(); spherexStore.nextEpoch(); }}>→</button>
           </div>
-
-          {/* Quick Comparison Mode Buttons */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => spherexStore.toggleBlinkMode()}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                blinkMode
-                  ? 'bg-pink-500 text-white border-pink-400 shadow-md shadow-pink-500/30 animate-pulse'
-                  : 'bg-slate-800/90 hover:bg-slate-700 text-pink-300 border-pink-500/40'
-              }`}
-            >
-              <span>⚡</span>
-              <span>{blinkMode ? `Parpadeando (1 ↔ ${epochs.length || 2})` : `Parpadeo 1 ↔ ${epochs.length || 2}`}</span>
-            </button>
-
-            {!isRealData && (
-              <button
-                onClick={() => spherexStore.toggleGhostingTrail()}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                  overlays.ghostingTrail
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30'
-                    : 'bg-slate-800/90 hover:bg-slate-700 text-amber-300 border-amber-500/40'
-                }`}
-                title="Muestra las 4 posiciones del astro a la vez como en una exposición múltiple"
-              >
-                <span>✨</span>
-                <span>Rastro Multi-Época</span>
-              </button>
-            )}
-          </div>
-
-          {/* Speed Selector */}
-          <div className="flex items-center gap-1 text-xs font-mono">
-            <span className="text-slate-400 text-[11px] mr-1">Velocidad:</span>
-            {[1, 2, 4, 8].map((f) => (
-              <button
-                key={f}
-                onClick={() => spherexStore.setFps(f)}
-                className={`px-2 py-1 rounded text-xs transition-colors ${
-                  fps === f
-                    ? 'bg-slate-700 text-cyan-300 font-bold border border-cyan-500/40'
-                    : 'text-slate-400 hover:text-slate-200 bg-slate-800/60'
-                }`}
-              >
-                {f}x
-              </button>
-            ))}
+          <div className="mode-selector" role="group" aria-label="Modo de visualización">
+            {(['normal', 'diff'] as const).map(m => <button key={m} disabled={!frames.length || !!error} aria-pressed={mode === m} onClick={() => spherexStore.setMode(m)}>{m === 'normal' ? 'Normal' : 'Diferencia'}</button>)}
           </div>
         </div>
-
-        {/* Epoch Steps Interactive Buttons */}
-        <div className={`grid gap-2 pt-1 ${epochs.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
-          {epochs.map((ep, idx) => {
-            const isSelected = idx === currentEpoch;
-            return (
-              <button
-                key={ep.epoch}
-                onClick={() => spherexStore.setCurrentEpoch(idx)}
-                className={`p-2 rounded-xl border text-left transition-all ${
-                  isSelected
-                    ? 'bg-cyan-950/60 border-cyan-400 text-white shadow-md shadow-cyan-500/20 ring-1 ring-cyan-400/40'
-                    : 'bg-slate-950/50 border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <div className="flex items-center justify-between text-xs font-mono font-bold">
-                  <span className={isSelected ? 'text-cyan-300' : 'text-slate-300'}>
-                    Época {ep.epoch}
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    {idx === 0 ? 'Inicio' : isRealData ? '+37.7 días' : `+${(idx * 0.5).toFixed(1)}a`}
-                  </span>
-                </div>
-                <div className="text-[11px] font-mono text-slate-300 mt-0.5">
-                  {ep.date.substring(0, 10)}
-                </div>
-              </button>
-            );
-          })}
+        <p className="active-date">Fecha activa: {epochs[currentEpoch]?.date.slice(0,10) || 'Sin observación'} UTC{mode === 'stack' ? ' · Apilado' : ''}</p>
+        <div className="epoch-selector" role="group" aria-label="Fechas de observación">
+          {epochs.map((ep, idx) => <button key={ep.epoch} disabled={!!error} aria-pressed={idx === currentEpoch} onClick={() => { spherexStore.stopPlayback(); spherexStore.setCurrentEpoch(idx); }}><span>Observación {idx + 1}</span><strong>{new Date(ep.date).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</strong></button>)}
         </div>
+        <details className="viewer-advanced"><summary>Exportación e inspección de píxeles</summary><div>
+          <button disabled={!frames.length} onClick={downloadSnapshot}>Descargar PNG</button><button disabled={!frames.length || isExportingGif} onClick={exportAnimatedGifAction}>Descargar GIF</button>
+          <form onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); spherexStore.setSelectedPixel({x: Number(data.get('x')), y: Number(data.get('y'))}); }}><label>Píxel X<input name="x" type="number" min="0" max={wcs.size[0]-1} defaultValue="0" required /></label><label>Píxel Y<input name="y" type="number" min="0" max={wcs.size[1]-1} defaultValue="0" required /></label><button>Inspeccionar</button></form>
+        </div></details>
       </div>
     </div>
   );

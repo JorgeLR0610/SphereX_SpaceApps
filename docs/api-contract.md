@@ -11,7 +11,7 @@ This documents the scientific API contract implemented in Milestone M2 (`server/
   }
   ```
 - Client calls `/api/frames` directly with same-origin relative URLs, requiring no CORS headers.
-- Mode dispatching: `RealSpherexAPI` is active when `NEXT_PUBLIC_USE_REAL_API=true` or query parameter `api=real` is present. Synthetic demo mode is enforced with `api=mock`.
+- Mode dispatching: `RealSpherexAPI` is active when `NEXT_PUBLIC_USE_REAL_API=true` or query parameter `api=real` is present. Synthetic demo mode is enforced with `api=mock`. M3.5 defaults to real mode when the environment variable is unset; explicit `NEXT_PUBLIC_USE_REAL_API=false` selects simulation. URL parameters override the environment. The UI origin switch starts a fresh observatory URL with an explicit `api` value.
 - Endpoints:
   - `GET /api/health`: Health status, version, and confirmation of cached dataset usability.
   - `GET /api/frames?ra=<deg>&dec=<deg>&fov=<arcmin>`: Returns real, WCS-aligned observations.

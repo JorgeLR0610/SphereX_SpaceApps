@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
+import { useDataMode } from './useDataMode';
 import { SPHEREX_DETECTORS } from '../lib/constants';
 import { DisplayMode, StretchFunction, ColormapType, DiffReference } from '../lib/types';
 import { 
@@ -12,6 +13,8 @@ import {
 export function ControlPanel() {
   const {
     frames,
+    fps,
+    playing,
     fov,
     detectors,
     sumDetectors,
@@ -23,31 +26,25 @@ export function ControlPanel() {
     detective,
     detectiveFound,
     detectiveTarget,
-    provenance,
   } = useSpherexStore();
 
-  const isRealData = Boolean(
-    provenance?.data_origin === 'observed_spherex' ||
-    (frames && frames.length > 0 && (
-      frames[0].provenance?.data_origin === 'observed_spherex' ||
-      (typeof frames[0].provenance?.collection === 'string' && frames[0].provenance.collection.includes('spherex'))
-    ))
-  );
+  const isRealData = useDataMode();
   const presentDetectors = new Set(frames?.map(f => f.detector));
 
   return (
-    <div className="w-full lg:w-80 flex flex-col gap-4 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-xl p-4 overflow-y-auto">
+    <div className="w-full flex flex-col gap-4 bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-xl p-4 overflow-y-auto">
       {/* 1. Header with title */}
       <div className="flex items-center justify-between pb-2 border-b border-slate-800">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <LayersIcon size={16} className="text-cyan-400" />
-          <span>Panel de Capas y Control</span>
+          <span>Ajustes de imagen</span>
         </div>
         <span className="text-[11px] font-mono text-cyan-400/80 px-2 py-0.5 rounded bg-cyan-950/40 border border-cyan-800/40">
           SPHEREx
         </span>
       </div>
 
+      {!isRealData && <>
       {/* 2. Campo de Visión (FOV Slider) */}
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between text-xs">
@@ -128,6 +125,7 @@ export function ControlPanel() {
         </div>
       </div>
 
+      </>}
       {/* 4. Modo de Procesamiento: Normal | Diferencia | Apilado */}
       <div className="flex flex-col gap-2 pt-2 border-t border-slate-800/70">
         <div className="text-xs text-slate-400 font-medium">Modo de Visualización</div>
@@ -189,17 +187,18 @@ export function ControlPanel() {
           </div>
         </div>
 
+        <label>Intensidad mínima<input type="number" step="any" value={stretch.min} onChange={e => { const min = Number(e.target.value); if (min < stretch.max) spherexStore.setStretch({ min }); }} /></label>
         {/* Sliders for min / max flux stretch */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
             <span>Máximo Flujo</span>
-            <span className="text-cyan-400 font-bold">{stretch.max.toFixed(0)}</span>
+            <span className="text-cyan-400 font-bold">{stretch.max.toFixed(3)}</span>
           </div>
           <input
             type="range"
-            min="20"
-            max="300"
-            step="5"
+            min={Math.min(0, ...frames.map(f => f.stats.min))}
+            max={Math.max(stretch.max, ...frames.map(f => f.stats.max), 1)}
+            step="any"
             value={stretch.max}
             onChange={(e) => spherexStore.setStretch({ max: parseFloat(e.target.value) })}
             className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
@@ -234,6 +233,7 @@ export function ControlPanel() {
           <span className="text-[10px] text-slate-500 font-mono">Overlays</span>
         </div>
         <div className="grid grid-cols-2 gap-2 text-xs">
+          {!isRealData && <>
           <label className="flex items-center gap-2 text-slate-300 cursor-pointer hover:text-white">
             <input
               type="checkbox"
@@ -285,6 +285,7 @@ export function ControlPanel() {
             </span>
           </label>
 
+          </>}
           <label className="flex items-center gap-2 text-slate-300 cursor-pointer hover:text-white col-span-2">
             <input
               type="checkbox"
@@ -300,6 +301,7 @@ export function ControlPanel() {
         </div>
       </div>
 
+      {!isRealData && <>
       {/* 7. El Gancho: Modo Detective 🕵️ */}
       <div className={`p-3 rounded-xl border transition-all ${
         isRealData
@@ -370,6 +372,10 @@ export function ControlPanel() {
           </div>
         ) : null}
       </div>
+      </>}
+      <button aria-pressed={playing} onClick={() => spherexStore.setPlaying(!playing)}>{playing ? "Pausar secuencia" : "Reproducir todas las fechas"}</button>
+      <label>Velocidad de parpadeo<select aria-label="Velocidad de parpadeo" value={fps} onChange={e => spherexStore.setFps(Number(e.target.value))}>{[1,2,3,4,8].map(n => <option key={n} value={n}>{n} imágenes/s</option>)}</select></label>
+      {!isRealData && <button onClick={() => spherexStore.toggleGhostingTrail()}>Alternar rastro de posiciones simuladas</button>}
     </div>
   );
 }

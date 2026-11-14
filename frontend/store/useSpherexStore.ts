@@ -88,7 +88,7 @@ export interface SpherexState {
   provenance?: Record<string, unknown>;
 }
 
-const isRealApiDefault = process.env.NEXT_PUBLIC_USE_REAL_API === 'true';
+const isRealApiDefault = process.env.NEXT_PUBLIC_USE_REAL_API !== 'false';
 const defaultPreset = isRealApiDefault
   ? (PRESET_TARGETS.find(p => p.id === 'm101') || PRESET_TARGETS[0])
   : (PRESET_TARGETS.find(p => p.id === 'wise0855') || PRESET_TARGETS[0]);
@@ -240,17 +240,18 @@ export const spherexStore = {
         description: baseTarget.description,
       },
       fov: isNaN(fov) ? 5.0 : Math.min(30, Math.max(1, fov)),
+      currentEpoch: Math.max(0, Number.parseInt(p.get('ep') || '0', 10) || 0),
       mode: ['normal', 'diff', 'stack'].includes(mode) ? mode : 'normal',
       detectors,
       sumDetectors: p.get('sum') === '1',
       isEmbed,
-      detective,
-      selectedPixel: isM101 ? { x: 15, y: 15 } : state.selectedPixel,
+      detective: activeIsReal ? false : detective,
+      selectedPixel: isM101 ? undefined : state.selectedPixel,
       selectedObjectCallout: isM101 ? null : state.selectedObjectCallout,
       overlays: {
         ...state.overlays,
-        gaia: p.get('gaia') === '1',
-        wise: p.get('wise') === '1',
+        gaia: !activeIsReal && p.get('gaia') === '1',
+        wise: !activeIsReal && p.get('wise') === '1',
       },
     };
     emitChange();
@@ -287,6 +288,7 @@ export const spherexStore = {
   },
 
   toggleDetector: (detNum: number) => {
+    if (isRealApiActive()) return;
     const idx = detNum - 1;
     const nextDets = [...state.detectors];
     nextDets[idx] = !nextDets[idx];
@@ -305,7 +307,7 @@ export const spherexStore = {
   },
 
   setMode: (mode: DisplayMode) => {
-    state = { ...state, mode };
+    state = { ...state, mode, playing: false, blinkMode: false, currentEpoch: mode === 'diff' && state.currentEpoch === 0 && state.epochs.length > 1 ? 1 : state.currentEpoch };
     if (mode === 'diff') {
       state.colormap = 'coolwarm';
     } else if (state.colormap === 'coolwarm') {
@@ -331,6 +333,7 @@ export const spherexStore = {
   },
 
   toggleOverlay: (name: keyof SpherexState['overlays']) => {
+    if (isRealApiActive() && ['gaia', 'wise', 'trajectory', 'annotations', 'ghostingTrail'].includes(name)) return;
     state = {
       ...state,
       overlays: { ...state.overlays, [name]: !state.overlays[name] },
@@ -345,6 +348,7 @@ export const spherexStore = {
       ...state,
       blinkMode: nextBlink,
       playing: false,
+      mode: nextBlink ? 'normal' : state.mode,
       currentEpoch: nextBlink ? 0 : state.currentEpoch,
     };
     sound.playBlip(nextBlink ? 880 : 440);
@@ -352,6 +356,7 @@ export const spherexStore = {
   },
 
   toggleGhostingTrail: () => {
+    if (isRealApiActive()) return;
     const next = !state.overlays.ghostingTrail;
     state = {
       ...state,
@@ -362,10 +367,13 @@ export const spherexStore = {
   },
 
   setDetective: (detective: boolean) => {
+    if (isRealApiActive()) return;
     state = { ...state, detective, detectiveFound: false };
     sound.playBlip(detective ? 950 : 450);
     emitChange();
   },
+
+  stopPlayback: () => { state = { ...state, playing: false, blinkMode: false }; emitChange(); },
 
   setCurrentEpoch: (epoch: number) => {
     const numEpochs = state.epochs.length || 4;
@@ -478,6 +486,8 @@ export const spherexStore = {
         targetName: state.target.name,
       });
 
+      if (!response.frames.length || !response.epochs.length) throw new Error('No hay observaciones disponibles para comparar.');
+
       // Detect if real observed SPHEREx data was returned
       const isRealData = response.frames.length > 0 && (
         response.provenance?.data_origin === 'observed_spherex' ||
@@ -521,6 +531,7 @@ export const spherexStore = {
         epochs: response.epochs,
         wcs: response.wcs,
         provenance: response.provenance,
+        fov: response.fovArcmin,
         detectiveTarget: response.detectiveTarget,
         detective: isRealData ? false : state.detective,
         detectiveFound: isRealData ? false : state.detectiveFound,

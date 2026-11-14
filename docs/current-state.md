@@ -2,7 +2,7 @@
 
 **Snapshot date:** 2026-11-13 UTC (session started with stated date 2026-11-12).
 
-**Source:** local checkout of `el-raton-vaquero/pruebaSpaceApps`, baseline commit `c92b686`, plus the M1 changes accompanying this report.
+**Source:** `JorgeLR0610/SphereX_SpaceApps`, branch `ux-redesign` based on `milestone3` (`2d70739`). Earlier milestone notes below retain historical evidence.
 
 **Verification level:** source inspection, installed/locked Python dependencies, offline tests, live IRSA queries/downloads, FITS inspection, rendered comparison, verified FastAPI endpoints (`/health` and `GET /frames`), Next.js `/api/*` rewrite proxy, Turbopack build/lint, and authentic headless Chromium E2E browser testing verifying real SPHEREx QR3 M101 observation playback and synthetic demo mode.
 
@@ -29,12 +29,12 @@ NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people ex
   downloaded caches and generated local outputs are ignored, not committed.
 
 ## Behavior confirmed by reading source
-- `NEXT_PUBLIC_USE_REAL_API=true` switches the adapter from mock to HTTP mode; without it, the frontend uses synthetic data.
+- `NEXT_PUBLIC_USE_REAL_API=true` switches the adapter from mock to HTTP mode; when unset, the frontend now opens real M101. Explicit `false` opens synthetic data; URL `api=real` / `api=mock` overrides the environment.
 - Real API client defaults to relative base `/api`, requesting `GET /api/frames?ra=...&dec=...&fov=...` and `GET /api/spectrum?ra=...&dec=...&fov=...&x=...&y=...`.
 - Mock frames currently mimic **four epochs x six detectors** (24 frames), with fake observation dates (including future 2026-12), moving objects, wavelengths, flags, and noise. These are demonstration outputs, **not SPHEREx measurements**.
 - `Frame.pixelData` is a browser `Float32Array`; raw JSON array conversion is required for a simple HTTP contract.
 - The WCS TypeScript type is simplified (`crpix`, `crval`, scalar `cdelt`, `size`). Real FITS WCS may require rotation/projection and reprojection onto a common output grid.
-- The frontend viewer supports sophisticated controls, but scientific validity and actual operation with real observations are **unverified**.
+- Real M101 integration has been browser-verified; this is a visualization comparison, not validated photometry or motion detection.
 - Cone search has a SIMBAD HTTP branch and automatic mock fallback; it is not
   SPHEREx observation discovery. Its live operation was not tested in this task.
 
@@ -69,20 +69,20 @@ NASA Space Apps Challenge 2026, challenge *Planet X and SPHEREx*: help people ex
    matching uses approximate visualization WCS-WAVE, not calibrated CWAVE/CBAND.
 2. No validated moving-object detection/showcase. M101 demonstrates a matched
    static field; the initial WISE field did not pass the chosen coverage threshold.
-3. No scientific API server or Next.js reverse proxy configured to route `/api/*` to Python.
-4. No production-real `FramesResponse` compatible with current `lib/types.ts`.
+3. Resolved in M2/M3: FastAPI and Next.js `/api/*` rewrite are implemented.
+4. Resolved in M2/M3: real responses deserialize to typed frontend pixel buffers.
 5. No validated spectrum extraction. A plotted synthetic spectrum must not be presented as observed data.
 6. Epoch count, detector count, spatial resolution and coverage cannot be hardcoded from the mock when using real products.
 7. Scientific noise, masks/quality flags, FITS units, WCS transforms and alignment require explicit handling.
 8. Real-data latency, offline fallback, file sizes and request failure states require UI treatment.
-9. Standardized backend tests, reproducible scientific dataset fixture and deployed full-stack demo are not yet evidenced.
+9. Backend tests and local full-stack browser checks exist; a publicly deployed demo remains unverified.
 10. A separate FITS-data redistribution license was not established; the official
     acknowledgement is documented. Do not assume the documentation site's BSD
     license applies to data. No bulk FITS data are included.
 
 Installed locally for M1: Python 3.14.10 / uv 0.13.5, Astropy 8.0.2, NumPy 2.5.4,
 Matplotlib 3.11.2, Reproject 0.21.0 and pytest 9.2.0 in `server/.venv`. Frontend
-`node_modules` was absent at inspection and was not installed or modified.
+`node_modules` was absent during M1; installed Next.js 16.4.6 dependencies are present during M3.5.
 
 ## Decisions agreed / proposed
 - **Agreed in discussion:** move toward a monorepo; preserve existing Next.js frontend, add independent scientific backend.
@@ -99,3 +99,18 @@ API implemented and verified with FastAPI (`/health` and `GET /frames`). M3: Ful
 
 Next work is M4 (Scientific Polish & Honest Moving Target Demonstration) and M5 (Calibrated WCS/Wavelengths & Real Spectral Extraction).
 See `docs/data-validation.md` and `server/README.md` for exact tested commands.
+
+## M3.5 — Simplified observatory (2026-11-13)
+
+Implemented on `ux-redesign`: real M101 by default, concise Spanish purpose,
+large central viewer, primary blink/date/difference controls, three-step inline
+guide, contextual scientific limitations and progressive disclosure. Unsupported
+real tools are hidden and synthetic experiences remain explicitly separate.
+API schemas, scientific backend and M1/M2 processing are unchanged.
+
+Frontend lint passes with one existing font warning; production build passes.
+All 47 backend tests pass (one Starlette deprecation warning). Chromium CDP
+checks verify real/synthetic playback, difference, advanced tools, export,
+keyboard help, unavailable region and synthetic embed; desktop/mobile screenshots
+are in `docs/assets/ux-*.png`. See `docs/ux-redesign.md` for exact commands,
+limitations and evidence. No visitor usability study or discovery claim.

@@ -3,8 +3,8 @@ import "./tailwind.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SPHEREx Time Machine | Ver el Cielo Moverse",
-  description: "Una web donde escribes unas coordenadas o el nombre de una estrella y ves el cielo infrarrojo moverse con los objetos que cambian resaltados.",
+  title: "SPHEREx Time Machine | Compara el cielo infrarrojo",
+  description: "Compara observaciones infrarrojas de SPHEREx tomadas en distintas fechas, con procedencia científica y simulación educativa separadas.",
 };
 
 export default function RootLayout({

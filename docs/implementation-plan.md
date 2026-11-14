@@ -53,6 +53,14 @@ photometry and motion detection are **not** completed by this milestone.
 7. Visual badge `🔭 DATOS REALES SPHEREx` dynamically distinguishes real observations from `🧪 MODO DEMO`.
 8. 47 backend tests pass (`cd server && uv run --locked pytest -v`); Next.js dev and production build succeed with 0 errors; headless Chromium E2E browser tests pass and screenshots captured in `docs/assets/m3-e2e-m101-observatory.png` and `docs/assets/m3-e2e-synthetic-mode.png`.
 
+## M3.5 — UX/UI simplification
+- [x] Central viewer, concise Spanish explanation, dates/Blink/Difference primary.
+- [x] Advanced tools collapsed; unsupported real tools hidden, simulation separate.
+- [x] Real M101 default, URL modes and backend contract preserved.
+- [x] Lint/build, 47 backend tests, real/synthetic Chromium desktop/mobile checks.
+
+Evidence and limitations: `docs/ux-redesign.md`, `docs/assets/ux-*.png`.
+
 ## M4 — Post-Integration: Catalog Overlays & Time-Domain Analysis
 *Based on official resource review in `docs/official-resources-review.md` (WiseView UX & Gaia DR3).*
 - [ ] Implement Gaia DR3 / CatWISE2020 TAP cone search for real astrometric reference sources.

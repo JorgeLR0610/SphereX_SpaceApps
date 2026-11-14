@@ -6,7 +6,7 @@ import { SPHEREX_DETECTORS } from '../lib/constants';
 import { InfoIcon } from './Icons';
 
 export function MetadataPanel() {
-  const { frames, currentEpoch, detectors } = useSpherexStore();
+  const { frames, currentEpoch, detectors, wcs } = useSpherexStore();
 
   // Find active frame for this epoch
   const activeDetIdx = detectors.findIndex(d => d);
@@ -33,7 +33,7 @@ export function MetadataPanel() {
           <span>Fecha UTC: </span>
           <span className="text-slate-200">{currentFrame.date.replace('T', ' ').replace('Z', '')}</span>
         </div>
-        <div className="text-slate-500 hidden sm:inline">
+        <div className="text-slate-500 ">
           <span>MJD: </span>
           <span className="text-slate-300">{currentFrame.mjd.toFixed(2)}</span>
         </div>
@@ -88,16 +88,16 @@ export function MetadataPanel() {
         </div>
 
         {stats && (
-          <div className="text-slate-400 hidden lg:inline">
+          <div className="text-slate-400 ">
             <span>Flujo: </span>
             <span className="text-cyan-300">{stats.min.toFixed(1)}–{stats.max.toFixed(1)}</span>
             <span className="text-slate-500 text-[10px] ml-1">{units || 'MJy/sr'}</span>
           </div>
         )}
 
-        <div className="text-slate-500 hidden md:inline">
+        <div className="text-slate-500 ">
           <span>Escala: </span>
-          <span className="text-slate-300">6.2&quot;/px</span>
+          <span className="text-slate-300">{(Math.abs(wcs.cdelt) * 3600).toFixed(3)}&quot;/px · {currentFrame.width}×{currentFrame.height} px</span>
         </div>
       </div>
     </div>
