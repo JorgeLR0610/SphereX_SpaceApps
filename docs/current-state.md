@@ -114,3 +114,18 @@ checks verify real/synthetic playback, difference, advanced tools, export,
 keyboard help, unavailable region and synthetic embed; desktop/mobile screenshots
 are in `docs/assets/ux-*.png`. See `docs/ux-redesign.md` for exact commands,
 limitations and evidence. No visitor usability study or discovery claim.
+
+## SphereXTM integration — 2026-11-14
+
+On `merge-repos`, baseline `f6d1204`, selectively integrated SphereXTM source
+`1c8b3486d8893c7438ffaa3545b4f60a018735c3`. One store, data loader and masked pixel
+pipeline serve the updated graphite/orange observatory, dynamic curtain, exports
+and independent educational experience. Interactive synthetic spectra and cone
+chart are available in advanced tools. No scientific backend or schema changes.
+
+Dependency installation, TypeScript, lint (one font warning), production build,
+47 backend tests, new pixel/cache/race tests and authentic Chromium desktop/mobile
+checks executed successfully. Both direct/proxied health and M101 endpoints return
+real cached data. See `docs/frontend-integration.md` for attribution, commands,
+captures and limits, including partial English coverage and unverified live
+catalog services. Earlier milestone sections are historical snapshots.

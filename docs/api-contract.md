@@ -58,3 +58,11 @@ This documents the scientific API contract implemented in Milestone M2 (`server/
 - [x] M3: Reverse proxy rewrite configured between Next.js and FastAPI (`next.config.ts`).
 - [x] M3: Frontend adapter converts numeric array into `Float32Array`.
 - [x] M3: Single-band Level 2 status and M5 spectral cube deferral clearly communicated in UI.
+
+## SphereXTM frontend integration (2026-11-14)
+
+HTTP shapes and proxy are unchanged. The integrated client validates dimensions,
+epoch references and mask lengths and converts pixel arrays to Float32Array.
+Request cancellation/sequence checks discard outdated results; bounded client
+cache keys contain origin and full query values. SpectrumViewer remains synthetic
+only. Catalog queries are separate external context, never SPHEREx detections.

@@ -110,3 +110,57 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 @media(min-width:701px) { .viewer-viewport { height:440px; } .viewer-viewport canvas { width:400px; } }
 
 .provenance-json { white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; color:#bdc8d9; }
+
+/* ===== CSS VARIABLES ===== */
+:root {
+  /* Paleta base neutra — Grafito de emulsión fotográfica */
+  --bg: #0c0d12;
+  --panel: #14151b;
+  --panel-raised: #1c1d25;
+  --ink: #f2f1f5;
+  --mute: #8c8a98;
+  --line: #232530;
+
+  /* UN solo color de alerta: Naranja astrométrico (óxido de placa) */
+  --alert: #ff6b35;
+  --alert-hi: #ff8552;
+  --acc: var(--alert);
+  --acc-hi: var(--alert-hi);
+  --sky: #0c0d12;
+
+  /* Formas: dos radios máximo */
+  --radius-sm: 4px;
+  --radius-lg: 8px;
+
+  /* Tipografía */
+  --font-display: "DM Serif Display", Georgia, serif;
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+
+  /* Escala tipográfica (5 niveles exactos) */
+  --text-display: clamp(1.75rem, 5.5vw, 3.2rem);
+  --text-heading: 1.35rem;
+  --text-body: 0.875rem;
+  --text-caption: 0.75rem;
+  --text-data: 0.6875rem;
+
+  /* Cinta espectral — 6 canales SPHEREx (funcional para el detector activo) */
+  --ch1: #6aa7ff;
+  --ch2: #4fd1a5;
+  --ch3: #ffd34f;
+  --ch4: #ff9a3c;
+  --ch5: #d44f6e;
+  --ch6: #b07cff;
+
+  /* Layout */
+  --header-h: 50px;
+  --ribbon-h: 3px;
+}
+body {font-family:Inter,system-ui,sans-serif;background:var(--bg);}
+h1,h2,h3 {font-family:"DM Serif Display",Georgia,serif;}
+.observatory-main {background:var(--bg);}
+.observatory-header,.temporal-controls {background:var(--panel);}
+.observatory-main > div {background:var(--bg);}
+.temporal-controls button.primary-action {background:#ff9a6c;color:#271309;}
+button[aria-pressed=true] {border-color:#ff9a6c;background:#513222;color:#fff0df;}
+.observatory-header .text-cyan-300 {color:#ff9a6c;}
+.origin.real {border-color:#80513a;color:#ffd7bf;}

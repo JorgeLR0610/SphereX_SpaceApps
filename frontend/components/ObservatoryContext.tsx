@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSpherexStore } from '../store/useSpherexStore';
 import { pixelToCelestial } from '../lib/wcs';
+import { useLocale } from './useLocale';
 import { useDataMode } from './useDataMode';
 export function ObservatoryContext() {
   const { mode, frames, currentEpoch, detectors, target } = useSpherexStore();
@@ -10,10 +11,11 @@ export function ObservatoryContext() {
   return <section className="field-heading"><div><h2>{real ? 'M101 — Galaxia del Molinete' : target.name}</h2><p>{real ? 'Dos observaciones de la misma región del cielo' : 'Experiencia educativa con imágenes, movimiento y espectros generados'}</p></div>{frame && <p>Detector {frame.detector} · ≈ {frame.band.lambda_um.toLocaleString('es', { maximumFractionDigits: 4 })} µm · {mode === 'stack' ? 'Promedio de observaciones' : 'Infrarrojo cercano'}</p>}</section>;
 }
 export function ComparisonExplanation() {
+  const {text}=useLocale();
   const { mode, currentEpoch, epochs, diffRef } = useSpherexStore();
   const real = useDataMode();
   const reference = diffRef === 'first' ? epochs[0] : diffRef === 'previous' ? epochs[Math.max(0, currentEpoch - 1)] : undefined;
-  return <section className="comparison-context"><h2>{mode === 'diff' ? '¿Qué muestra la diferencia?' : mode === 'stack' ? '¿Qué muestra el apilado?' : '¿Qué estoy viendo?'}</h2><p>{mode === 'diff' ? `Resta visual: ${epochs[currentEpoch]?.date.slice(0,10) || 'observación activa'} menos ${reference?.date.slice(0,10) || 'mediana de las otras fechas'}. Azul indica valores menores; rojo, mayores. El centro de la escala representa cero.` : mode === 'stack' ? 'Promedio de las observaciones disponibles en los detectores seleccionados.' : 'La misma región en distintas fechas. Selecciona una fecha o activa el parpadeo para alternar las imágenes.'}</p><p>{real ? 'Esta comparación usa observaciones auténticas. Las diferencias pueden incluir ruido y efectos instrumentales; no confirman objetos en movimiento ni el Planeta X. No se han igualado los fondos ni las respuestas instrumentales.' : 'Simulación educativa: los objetos, movimientos y espectros generados no son mediciones de SPHEREx.'}</p></section>;
+  return <section className="comparison-context"><h2>{mode === 'diff' ? '¿Qué muestra la diferencia?' : mode === 'stack' ? '¿Qué muestra el apilado?' : '¿Qué estoy viendo?'}</h2><p>{mode === 'diff' ? `Resta visual: ${epochs[currentEpoch]?.date.slice(0,10) || 'observación activa'} menos ${reference?.date.slice(0,10) || 'mediana de las otras fechas'}. Azul indica valores menores; rojo, mayores. El centro de la escala representa cero.` : mode === 'stack' ? 'Promedio de las observaciones disponibles en los detectores seleccionados.' : 'La misma región en distintas fechas. Selecciona una fecha o activa el parpadeo para alternar las imágenes.'}</p><p>{real ? text.limit : 'Simulación educativa: los objetos, movimientos y espectros generados no son mediciones de SPHEREx.'}</p></section>;
 }
 export function InlineGuide() {
   const [visible, setVisible] = useState(false);

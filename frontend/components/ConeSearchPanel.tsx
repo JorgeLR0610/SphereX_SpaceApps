@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   ConeResult,
   ConeFilterType,
+  CURATED_CONE_TARGETS,
   searchCone,
   formatSeparation,
   formatMovementSpeed,
@@ -11,6 +12,8 @@ import {
 import { resolveTargetName } from '../lib/sesame';
 import { parseCoordinates, formatSexagesimal } from '../lib/wcs';
 import { sound } from '../lib/sound';
+import { useDialogFocus } from './useDialogFocus';
+import { CelestialConeChart } from './CelestialConeChart';
 
 interface ConeSearchPanelProps {
   isOpen: boolean;
@@ -20,6 +23,7 @@ interface ConeSearchPanelProps {
   currentName: string;
   onSelectResult: (result: ConeResult) => void;
   onResultsChange: (results: ConeResult[], radiusArcmin: number) => void;
+  onHuntArea?: () => void;
   initialRadius?: number;
   initialFilters?: ConeFilterType[];
 }
@@ -32,10 +36,13 @@ export function ConeSearchPanel({
   currentName,
   onSelectResult,
   onResultsChange,
+  onHuntArea,
   initialRadius = 10,
   initialFilters = ['all'],
 }: ConeSearchPanelProps) {
-  // Center inputs
+  const dialogRef=useDialogFocus(isOpen,onClose);
+  const [synthetic, setSynthetic] = useState(false);
+  // Center coordinates & query string
   const [centerInput, setCenterInput] = useState<string>('');
   const [activeCoords, setActiveCoords] = useState<{ ra: number; dec: number }>({
     ra: currentRa,
@@ -45,33 +52,44 @@ export function ConeSearchPanel({
   // Search parameters
   const [radiusArcmin, setRadiusArcmin] = useState<number>(initialRadius);
   const [filters, setFilters] = useState<ConeFilterType[]>(initialFilters);
+  const [sortBy, setSortBy] = useState<'interest' | 'distance'>('interest');
 
-  // Status & Results
-  const [results, setResults] = useState<ConeResult[]>([]);
+  // UI state
+  const [showChart, setShowChart] = useState<boolean>(true);
+  const [curatedIndex, setCuratedIndex] = useState<number>(0);
+  const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
+  const [hoveredResultId, setHoveredResultId] = useState<string | null>(null);
+
+  // Status & Data
+  const [rawResults, setRawResults] = useState<ConeResult[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [loadingStep, setLoadingStep] = useState<string>('Iniciando consulta...');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [noticeMessage, setNoticeMessage] = useState<string>('');
-  const [hoveredResultId, setHoveredResultId] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = dialogRef;
+  const onResultsChangeRef = useRef(onResultsChange);
+
+  useEffect(() => {
+    onResultsChangeRef.current = onResultsChange;
+  }, [onResultsChange]);
 
   // Sync initial values when current object changes or panel opens
   useEffect(() => {
-    if (isOpen) {
-      const timer = setTimeout(() => {
-        setActiveCoords({ ra: currentRa, dec: currentDec });
-        setCenterInput(currentName);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
+    const timer=setTimeout(()=>{ if (isOpen) {
+      setActiveCoords((prev) => {
+        if (prev.ra === currentRa && prev.dec === currentDec) return prev;
+        return { ra: currentRa, dec: currentDec };
+      });
+      setCenterInput((prev) => (prev === currentName ? prev : currentName));
+    } },0);return ()=>clearTimeout(timer);
   }, [isOpen, currentRa, currentDec, currentName]);
 
-  // Execute Search
+  // Execute Search: Fetch all candidates in the cone to calculate dynamic category counts
   const executeSearch = useCallback(
-    async (raToUse: number, decToUse: number, radToUse: number, filtersToUse: ConeFilterType[]) => {
-      // Cancel pending request
+    async (raToUse: number, decToUse: number, radToUse: number) => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -79,35 +97,38 @@ export function ConeSearchPanel({
       abortControllerRef.current = controller;
 
       setIsLoading(true);
+      setLoadingStep('Consultando SIMBAD TAP, Gaia DR3 y WISE...');
       setErrorMessage('');
+      setRawResults([]);
 
       try {
-        const response = await searchCone({
+        const response = await searchCone({ useReal: !synthetic,
           ra: raToUse,
           dec: decToUse,
           radiusArcmin: radToUse,
-          filters: filtersToUse,
+          filters: ['all'],
           signal: controller.signal,
         });
 
         if (!controller.signal.aborted) {
-          setResults(response.results);
+          setRawResults(response.results);
           setNoticeMessage(response.notice || '');
-          onResultsChange(response.results, radToUse);
         }
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') return;
-        setErrorMessage('Hubo un problema de conexión con el catálogo celeste.');
+        setErrorMessage(
+          'No se pudo conectar con el catálogo astronómico federado (SIMBAD / Gaia / WISE). Comprueba tu conexión o reintenta.'
+        );
       } finally {
         if (!controller.signal.aborted) {
           setIsLoading(false);
         }
       }
     },
-    [onResultsChange]
+    [synthetic]
   );
 
-  // Trigger search whenever activeCoords, radius, or filters change while panel is open
+  // Trigger search with debounce whenever activeCoords or radius changes
   useEffect(() => {
     if (!isOpen) return;
 
@@ -116,13 +137,84 @@ export function ConeSearchPanel({
     }
 
     debounceTimerRef.current = setTimeout(() => {
-      executeSearch(activeCoords.ra, activeCoords.dec, radiusArcmin, filters);
+      executeSearch(activeCoords.ra, activeCoords.dec, radiusArcmin);
     }, 280);
 
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [isOpen, activeCoords, radiusArcmin, filters, executeSearch]);
+  }, [isOpen, activeCoords, radiusArcmin, executeSearch]);
+
+  // Compute dynamic category counts BEFORE filtering
+  const counts = useMemo(() => {
+    return {
+      all: rawResults.length,
+      fast: rawResults.filter((r) => r.pmArcsecPerYear >= 0.20).length,
+      coldcandidate: rawResults.filter(
+        (r) =>
+          r.isColdCandidate ||
+          (!r.hasGaiaMatch && (r.kindCode.startsWith('BD') || r.pmArcsecPerYear >= 0.1))
+      ).length,
+      browndwarf: rawResults.filter(
+        (r) => r.kindCode.startsWith('BD') || r.kindLabel.toLowerCase().includes('marrón')
+      ).length,
+      variable: rawResults.filter(
+        (r) =>
+          r.kindCode.startsWith('V') ||
+          r.kindCode.startsWith('Mi') ||
+          r.kindLabel.toLowerCase().includes('cambia')
+      ).length,
+    };
+  }, [rawResults]);
+
+  // Filtered and Ranked results by Scientific Interest Score or Distance
+  const displayedResults = useMemo(() => {
+    let list = rawResults;
+    if (!filters.includes('all') && filters.length > 0) {
+      list = rawResults.filter((item) => {
+        return filters.some((f) => {
+          if (f === 'fast') return item.pmArcsecPerYear >= 0.20;
+          if (f === 'coldcandidate')
+            return (
+              item.isColdCandidate ||
+              (!item.hasGaiaMatch && (item.kindCode.startsWith('BD') || item.pmArcsecPerYear >= 0.1))
+            );
+          if (f === 'browndwarf')
+            return item.kindCode.startsWith('BD') || item.kindLabel.toLowerCase().includes('marrón');
+          if (f === 'variable')
+            return (
+              item.kindCode.startsWith('V') ||
+              item.kindCode.startsWith('Mi') ||
+              item.kindLabel.toLowerCase().includes('cambia')
+            );
+          return true;
+        });
+      });
+    }
+
+    const sorted = [...list].sort((a, b) => {
+      if (a.sepArcsec === 0 && b.sepArcsec !== 0) return -1;
+      if (b.sepArcsec === 0 && a.sepArcsec !== 0) return 1;
+
+      if (sortBy === 'distance') {
+        if (a.sepArcsec !== b.sepArcsec) return a.sepArcsec - b.sepArcsec;
+        return b.interestScore - a.interestScore;
+      }
+
+      if (b.interestScore !== a.interestScore) return b.interestScore - a.interestScore;
+      return a.sepArcsec - b.sepArcsec;
+    });
+
+    return sorted.map((item, idx) => ({
+      ...item,
+      number: idx + 1,
+    }));
+  }, [rawResults, filters, sortBy]);
+
+  // Sync displayed results with parent viewer markers
+  useEffect(() => {
+    onResultsChangeRef.current?.(displayedResults, radiusArcmin);
+  }, [displayedResults, radiusArcmin]);
 
   // Handle center input submit
   const handleCenterSubmit = async (e: React.FormEvent) => {
@@ -132,15 +224,14 @@ export function ConeSearchPanel({
 
     setErrorMessage('');
 
-    // 1. Try coordinate parsing
     const parsed = parseCoordinates(query);
     if (parsed) {
       setActiveCoords(parsed);
       return;
     }
 
-    // 2. Try Sesame / catalog resolver
     setIsLoading(true);
+    setLoadingStep(`Resolviendo nombre "${query}" en CDS Sesame...`);
     try {
       const res = await resolveTargetName(query);
       if (res) {
@@ -148,7 +239,7 @@ export function ConeSearchPanel({
         setCenterInput(res.name);
       } else {
         setErrorMessage(
-          'No reconocimos esa ubicación. Usa coordenadas en grados (ej. 133.795 -7.245) o sexagesimal (ej. 08h55m10s -07d14m42s).'
+          'No reconocimos esa ubicación. Usa coordenadas en grados (ej. 133.795 -7.245) o sexagesimal (ej. 08h55m10.8s -07d14m42s).'
         );
       }
     } finally {
@@ -156,8 +247,27 @@ export function ConeSearchPanel({
     }
   };
 
+  // "Sorpréndeme": Cycle through curated astronomical targets
+  const handleSurpriseMe = () => {
+    sound.playBlip(640, 0.04);
+    const nextIdx = (curatedIndex + 1) % CURATED_CONE_TARGETS.length;
+    setCuratedIndex(nextIdx);
+    const target = CURATED_CONE_TARGETS[nextIdx];
+    setActiveCoords({ ra: target.ra, dec: target.dec });
+    setCenterInput(target.name);
+    setRadiusArcmin(target.defaultRadius);
+  };
+
+  // "Usar objeto actual": Reset to viewer's center
+  const resetToViewerCenter = () => {
+    sound.playBlip(540, 0.04);
+    setActiveCoords({ ra: currentRa, dec: currentDec });
+    setCenterInput(currentName);
+  };
+
   // Filter Chip Toggle
   const toggleFilter = (f: ConeFilterType) => {
+    sound.playBlip(580, 0.03);
     if (f === 'all') {
       setFilters(['all']);
       return;
@@ -176,12 +286,6 @@ export function ConeSearchPanel({
     setFilters(next);
   };
 
-  // Reset to current viewer center
-  const resetToViewerCenter = () => {
-    setActiveCoords({ ra: currentRa, dec: currentDec });
-    setCenterInput(currentName);
-  };
-
   // Key navigation for accessibility
   useEffect(() => {
     if (!isOpen) return;
@@ -196,98 +300,193 @@ export function ConeSearchPanel({
 
   const { raStr, decStr } = formatSexagesimal(activeCoords.ra, activeCoords.dec);
 
+  // Astronomical equivalences
+  const moonDiameterEquiv = ((radiusArcmin * 2) / 30.0).toFixed(1);
+  const fastMoverTravel2YrArcsec = 20; // 10"/yr * 2 years
+  const radiusArcsec = radiusArcmin * 60;
+  const isRadiusSufficient = radiusArcsec >= fastMoverTravel2YrArcsec;
+
+  // Logarithmic ticks for radius ruler
+  const rulerTicks = [1, 2, 5, 10, 20, 30, 60];
+
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Explorar alrededores por radio"
-      className="fixed inset-0 z-40 pointer-events-auto flex justify-end transition-opacity"
+      aria-label="Explorar el vecindario"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 50,
+      }}
+      className="flex flex-row md:justify-end max-md:flex-col max-md:justify-end"
     >
       {/* Backdrop */}
       <div
         onClick={onClose}
-        className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.55)',
+        }}
       />
 
       {/* Drawer Container (Desktop Sidebar / Mobile Bottom Sheet) */}
       <div
-        ref={panelRef}
-        className="relative z-50 w-full max-w-md md:max-w-lg bg-[#141733] border-l border-[#272a4f] shadow-2xl flex flex-col h-full max-md:max-h-[88vh] max-md:rounded-t-3xl max-md:mt-auto animate-slide-in text-[#f1eefb]"
+        ref={panelRef} role="dialog" aria-modal="true" aria-label="Vecindario celeste"
+        style={{
+          position: 'relative',
+          zIndex: 60,
+          width: '100%',
+          maxWidth: 440,
+          background: 'var(--panel)',
+          display: 'flex',
+          flexDirection: 'column',
+          color: 'var(--ink)',
+          boxShadow: '-4px 0 24px rgba(0,0,0,0.3)',
+        }}
+        className="h-full md:border-l md:border-[var(--line)] max-md:h-auto max-md:max-h-[85vh] max-md:rounded-t-xl max-md:border-t max-md:border-[var(--line)] animate-slide-in"
       >
         {/* Panel Header */}
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[#272a4f] bg-[#0b0d1c]/60">
-          <div className="flex items-center gap-2.5">
-            <span className="text-xl">🔭</span>
-            <div>
-              <h2 className="text-base sm:text-lg font-extrabold text-white leading-tight">
-                Explorar alrededores
-              </h2>
-              <p className="text-xs text-[#9a95b8]">
-                Búsqueda por radio en el vecindario celeste
-              </p>
-            </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '14px 18px',
+            borderBottom: '1px solid var(--line)',
+            background: 'var(--panel)',
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: '1.25rem',
+                fontWeight: 400,
+                color: 'var(--ink)',
+                margin: 0,
+                lineHeight: 1.2,
+              }}
+            >
+              Explorar el vecindario
+            </h2>
+            <p style={{ fontSize: 'var(--text-data)', color: 'var(--mute)', margin: '2px 0 0' }}>
+              Búsqueda por radio en el infrarrojo (SPHEREx / Gaia / WISE)
+            </p>
           </div>
           <button
             onClick={onClose}
             aria-label="Cerrar panel de exploración"
-            className="w-8 h-8 rounded-full bg-[#0a0d1f] hover:bg-[#272a4f] text-[#9a95b8] hover:text-white flex items-center justify-center font-bold text-sm transition-colors cursor-pointer"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--mute)',
+              fontSize: '1.1rem',
+              cursor: 'pointer',
+              padding: '4px 8px',
+            }}
           >
             ✕
           </button>
         </div>
 
-        {/* Scrollable Form & Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 text-xs sm:text-sm">
+        {/* Scrollable Content */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '16px 18px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+          }}
+        >
           {/* 1. Centro Selector */}
-          <div className="bg-[#0a0d1f] border border-[#272a4f] rounded-2xl p-3.5 space-y-2">
-            <div className="flex items-center justify-between">
-              <label htmlFor="center-input" className="font-bold text-white text-xs">
-                Centro de búsqueda
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px 10px' }}>
+              <label htmlFor="center-input" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, color: 'var(--ink)' }}>
+                Centro de observación
               </label>
-              {(activeCoords.ra !== currentRa || activeCoords.dec !== currentDec) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button
                   type="button"
                   onClick={resetToViewerCenter}
-                  className="text-[11px] text-[#ff5a7e] hover:underline font-semibold cursor-pointer"
+                  className="link-text"
+                  style={{ fontSize: 'var(--text-data)' }}
+                  title="Restablecer al objeto cargado en el visor"
                 >
-                  Volver al objeto actual
+                  Usar objeto actual
                 </button>
-              )}
+                <span style={{ color: 'var(--line)' }}>·</span>
+                <button
+                  type="button"
+                  onClick={handleSurpriseMe}
+                  className="link-text"
+                  style={{ fontSize: 'var(--text-data)' }}
+                  title="Saltar a un objetivo astronómico notable"
+                >
+                  Sorpréndeme
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleCenterSubmit} className="flex gap-2">
+            <form onSubmit={handleCenterSubmit} style={{ display: 'flex', gap: 6 }}>
               <input
                 id="center-input"
                 type="text"
                 value={centerInput}
                 onChange={(e) => setCenterInput(e.target.value)}
-                placeholder="Nombre o coords (133.79 -7.24)"
-                className="flex-1 px-3 py-1.5 rounded-xl border border-[#272a4f] bg-[#141733] text-xs text-white placeholder-[#9a95b8] focus:outline-none focus:border-[#ff5a7e]"
+                placeholder="Nombre o coords (ej. 76.956 30.401 o 05h07m49s)"
+                style={{
+                  flex: 1,
+                  padding: '6px 10px',
+                  borderRadius: 'var(--radius-sm, 4px)',
+                  border: '1px solid var(--line)',
+                  background: 'var(--panel-raised)',
+                  color: 'var(--ink)',
+                  fontSize: 'var(--text-caption)',
+                  outline: 'none',
+                }}
               />
               <button
                 type="submit"
                 disabled={isLoading}
-                className="px-3.5 py-1.5 rounded-xl bg-[#272a4f] hover:bg-[#34396b] text-white text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                className="btn-primary"
+                style={{ padding: '6px 12px' }}
               >
                 Fijar
               </button>
             </form>
 
-            <div className="text-[11px] font-mono text-[#9a95b8] flex justify-between">
+            <div
+              style={{
+                fontSize: 'var(--text-data)',
+                color: 'var(--mute)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 4,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
               <span>{raStr}, {decStr}</span>
-              <span>({activeCoords.ra.toFixed(3)}°, {activeCoords.dec.toFixed(3)}°)</span>
+              <span>({activeCoords.ra.toFixed(4)}°, {activeCoords.dec.toFixed(4)}°)</span>
             </div>
           </div>
 
-          {/* 2. Radius Slider */}
-          <div className="bg-[#0a0d1f] border border-[#272a4f] rounded-2xl p-3.5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-white text-xs">Distancia desde el centro</span>
-              <span className="font-mono font-extrabold text-[#ff5a7e] text-sm">
-                {radiusArcmin}′ <span className="text-[10px] text-[#9a95b8]">({radiusArcmin * 60}″)</span>
+          {/* 2. Radius Logarithmic Ruler */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 'var(--text-caption)', fontWeight: 600, color: 'var(--ink)' }}>
+                Radio de búsqueda
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--alert)', fontSize: 'var(--text-body)' }}>
+                {radiusArcmin}′ <span style={{ fontSize: 'var(--text-data)', color: 'var(--mute)', fontWeight: 400 }}>({radiusArcmin * 60}″)</span>
               </span>
             </div>
 
+            {/* Slider */}
             <input
               type="range"
               min="1"
@@ -295,159 +494,550 @@ export function ConeSearchPanel({
               value={radiusArcmin}
               onChange={(e) => setRadiusArcmin(parseInt(e.target.value, 10))}
               aria-label="Radio de búsqueda en minutos de arco"
-              className="w-full accent-[#ff5a7e] cursor-pointer"
+              style={{ width: '100%', accentColor: 'var(--alert)', cursor: 'pointer' }}
             />
 
-            <div className="flex justify-between text-[10px] text-[#9a95b8] font-mono">
-              <span>1′ (muy cerca)</span>
-              <span>30′</span>
-              <span>60′ (1 grado)</span>
+            {/* Quick tick buttons */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 'var(--text-data)', color: 'var(--mute)', fontVariantNumeric: 'tabular-nums' }}>
+              {rulerTicks.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setRadiusArcmin(t)}
+                  style={{
+                    padding: '2px 6px',
+                    borderRadius: 'var(--radius-sm, 4px)',
+                    border: `1px solid ${radiusArcmin === t ? 'var(--alert)' : 'transparent'}`,
+                    background: radiusArcmin === t ? 'rgba(255,107,53,0.12)' : 'transparent',
+                    color: radiusArcmin === t ? 'var(--alert)' : 'var(--mute)',
+                    cursor: 'pointer',
+                    fontWeight: radiusArcmin === t ? 700 : 400,
+                  }}
+                >
+                  {t}′
+                </button>
+              ))}
             </div>
 
-            {radiusArcmin > 25 && (
-              <p className="text-[11px] text-[#ffd34f] mt-1 bg-[#ffd34f]/10 px-2 py-1 rounded-lg border border-[#ffd34f]/20">
-                ℹ️ Un área mayor ({radiusArcmin}′) abarca más espacio celeste y puede tardar más en cargar.
-              </p>
+            {/* Astronomical context lines */}
+            <div
+              style={{
+                fontSize: 'var(--text-data)',
+                color: 'var(--mute)',
+                background: 'var(--panel-raised)',
+                border: '1px solid var(--line)',
+                borderRadius: 'var(--radius-sm, 4px)',
+                padding: '8px 10px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <div>
+                <strong style={{ color: 'var(--ink)' }}>Equivalencia lunar:</strong> {moonDiameterEquiv}× el diámetro de la Luna llena (~30′).
+              </div>
+              <div>
+                <strong style={{ color: 'var(--ink)' }}>Seguimiento:</strong> Un objeto a 10″/año recorre {fastMoverTravel2YrArcsec}″ en dos años: este radio ({radiusArcsec}″) es{' '}
+                <span style={{ color: isRadiusSufficient ? 'var(--ink)' : 'var(--alert)', fontWeight: 600 }}>
+                  {isRadiusSufficient ? 'suficiente' : 'estrecho'}
+                </span>{' '}
+                para seguirlo en SPHEREx.
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Carta Celeste del Panel (Elemento Protagonista) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 'var(--text-caption)', fontWeight: 600, color: 'var(--ink)' }}>
+                Carta celeste del cono
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowChart((v) => !v)}
+                className="link-text"
+                style={{ fontSize: 'var(--text-data)' }}
+              >
+                {showChart ? 'Ocultar carta' : 'Ver carta celeste'}
+              </button>
+            </div>
+
+            {showChart && (
+              <><label><input type="checkbox" checked={synthetic} onChange={e=>setSynthetic(e.target.checked)}/>Catálogo simulado (seleccionar y consultar de nuevo)</label><CelestialConeChart
+                centerRa={activeCoords.ra}
+                centerDec={activeCoords.dec}
+                radiusArcmin={radiusArcmin}
+                results={displayedResults}
+                hoveredId={hoveredResultId}
+                onHoverId={setHoveredResultId}
+                onSelectResult={(item) => {
+                  sound.playTargetSelect();
+                  onSelectResult(item);
+                  onClose();
+                }}
+                onSelectNewCenter={(coords) => {
+                  sound.playBlip(520, 0.04);
+                  setActiveCoords(coords);
+                  setCenterInput(`${coords.ra.toFixed(4)} ${coords.dec.toFixed(4)}`);
+                }}
+              /></>
             )}
           </div>
 
-          {/* 3. Filter Chips */}
-          <div>
-            <span className="block font-bold text-white text-xs mb-2">Filtrar por tipo de objeto:</span>
-            <div className="flex flex-wrap gap-1.5">
+          {/* 4. Filter Chips con contadores calculados dinámicamente */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+            <span style={{ fontSize: 'var(--text-caption)', fontWeight: 600, color: 'var(--ink)' }}>
+              Filtrar candidatos:
+            </span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {[
-                { id: 'all', label: 'Todos' },
-                { id: 'fast', label: 'Se mueven rápido' },
-                { id: 'browndwarf', label: 'Enanas marrones' },
-                { id: 'variable', label: 'Cambian de brillo' },
+                { id: 'all' as ConeFilterType, label: 'Todos', count: counts.all },
+                { id: 'fast' as ConeFilterType, label: 'Se mueven rápido', count: counts.fast },
+                { id: 'coldcandidate' as ConeFilterType, label: 'Sin pareja en Gaia', count: counts.coldcandidate },
+                { id: 'browndwarf' as ConeFilterType, label: 'Enanas marrones', count: counts.browndwarf },
+                { id: 'variable' as ConeFilterType, label: 'Cambian de brillo', count: counts.variable },
               ].map((chip) => {
-                const active = filters.includes(chip.id as ConeFilterType);
+                const active = filters.includes(chip.id);
                 return (
                   <button
                     key={chip.id}
                     type="button"
-                    onClick={() => toggleFilter(chip.id as ConeFilterType)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
-                      active
-                        ? 'bg-[#ff5a7e] text-white border-[#ff5a7e] shadow-sm'
-                        : 'bg-[#0a0d1f] text-[#9a95b8] border-[#272a4f] hover:text-white hover:border-[#9a95b8]'
-                    }`}
+                    onClick={() => toggleFilter(chip.id)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 'var(--radius-sm, 4px)',
+                      border: `1px solid ${active ? 'var(--ink)' : 'var(--line)'}`,
+                      background: active ? 'var(--panel-raised)' : 'transparent',
+                      color: active ? 'var(--ink)' : 'var(--mute)',
+                      fontSize: 'var(--text-data)',
+                      fontWeight: active ? 600 : 500,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
                   >
-                    {chip.label}
+                    <span>{chip.label}</span>
+                    <span
+                      style={{
+                        fontVariantNumeric: 'tabular-nums',
+                        fontWeight: 700,
+                        color: active ? 'var(--alert)' : 'var(--mute)',
+                      }}
+                    >
+                      {chip.count}
+                    </span>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Notices & Error Messages */}
-          {errorMessage && (
-            <div className="p-3 rounded-xl bg-red-950/60 border border-red-800 text-red-200 text-xs flex items-center justify-between">
-              <span>{errorMessage}</span>
-              <button
-                onClick={() => executeSearch(activeCoords.ra, activeCoords.dec, radiusArcmin, filters)}
-                className="underline font-bold ml-2 hover:text-white cursor-pointer"
-              >
-                Reintentar
-              </button>
-            </div>
-          )}
-
           {noticeMessage && !errorMessage && (
-            <div className="text-[11px] text-[#9a95b8] italic">
-              ℹ️ {noticeMessage}
+            <div style={{ fontSize: 'var(--text-data)', color: 'var(--mute)', fontStyle: 'italic' }}>
+              {noticeMessage}
             </div>
           )}
 
-          {/* 4. Results Section Header */}
-          <div className="flex items-center justify-between pt-2 border-t border-[#272a4f]">
-            <span className="font-bold text-white text-xs">
-              {isLoading
-                ? `Buscando en un radio de ${radiusArcmin}′…`
-                : `${results.length} objeto${results.length === 1 ? '' : 's'} encontrado${results.length === 1 ? '' : 's'}`}
-            </span>
-            {results.length >= 50 && (
-              <span className="text-[10px] text-[#9a95b8]">Mostrando los 50 más cercanos</span>
-            )}
+          {/* 5. Header de la Sección de Resultados con ordenación y acción Cazar */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 8,
+              borderTop: '1px solid var(--line)',
+              paddingTop: 12,
+            }}
+          >
+            <div>
+              <span style={{ fontSize: 'var(--text-caption)', fontWeight: 600, color: 'var(--ink)' }}>
+                {isLoading
+                  ? 'Consultando catálogos celestes…'
+                  : errorMessage
+                  ? 'Error en la consulta'
+                  : `${displayedResults.length} objeto${displayedResults.length === 1 ? '' : 's'} en ${radiusArcmin}′`}
+              </span>
+              {!isLoading && !errorMessage && displayedResults.length >= 200 && (
+                <span style={{ display: 'block', fontSize: 'var(--text-data)', color: 'var(--mute)' }}>
+                  Mostrando los 200 más interesantes del área
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {onHuntArea && !isLoading && displayedResults.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    sound.playTargetSelect();
+                    onHuntArea();
+                    onClose();
+                  }}
+                  className="btn-primary"
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: 'var(--text-data)',
+                  }}
+                  title="Detectar dipolos de movimiento y cruzarlos con el catálogo"
+                >
+                  Cazar movimiento en esta zona
+                </button>
+              )}
+
+              {/* Sort toggle */}
+              {!isLoading && displayedResults.length > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-data)', color: 'var(--mute)' }}>
+                  <span>Ordenar:</span>
+                  <button
+                    type="button"
+                    onClick={() => setSortBy('interest')}
+                    className="link-text"
+                    style={{
+                      color: sortBy === 'interest' ? 'var(--ink)' : 'var(--mute)',
+                      fontWeight: sortBy === 'interest' ? 700 : 400,
+                      textDecoration: sortBy === 'interest' ? 'underline' : 'none',
+                    }}
+                  >
+                    Interés
+                  </button>
+                  <span>·</span>
+                  <button
+                    type="button"
+                    onClick={() => setSortBy('distance')}
+                    className="link-text"
+                    style={{
+                      color: sortBy === 'distance' ? 'var(--ink)' : 'var(--mute)',
+                      fontWeight: sortBy === 'distance' ? 700 : 400,
+                      textDecoration: sortBy === 'distance' ? 'underline' : 'none',
+                    }}
+                  >
+                    Distancia
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* 5. Results List or Skeletons */}
+          {/* 6. Resultados en Formato Cuaderno de Campo (Field Notebook) */}
           {isLoading ? (
-            <div className="space-y-2.5">
-              {[1, 2, 3, 4].map((i) => (
-                <div
-                  key={i}
-                  className="p-3 rounded-2xl bg-[#0a0d1f] border border-[#272a4f] animate-pulse space-y-2"
-                >
-                  <div className="h-4 bg-[#272a4f] rounded w-2/3" />
-                  <div className="h-3 bg-[#272a4f] rounded w-1/2" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '8px 0' }}>
+              <div
+                style={{
+                  padding: 16,
+                  borderRadius: 'var(--radius-sm, 4px)',
+                  background: 'var(--panel-raised)',
+                  border: '1px solid var(--line)',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <p style={{ fontSize: 'var(--text-caption)', color: 'var(--ink)', margin: 0 }}>
+                  {loadingStep}
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 16, fontSize: 'var(--text-data)', color: 'var(--mute)' }}>
+                  <span>SIMBAD (CDS)</span>
+                  <span>Gaia DR3 (ESA)</span>
+                  <span>CatWISE (NASA)</span>
                 </div>
-              ))}
+              </div>
             </div>
-          ) : results.length === 0 ? (
-            <div className="p-6 rounded-2xl bg-[#0a0d1f] border border-[#272a4f] text-center text-xs text-[#9a95b8] space-y-2">
-              <span className="text-2xl block">🔍</span>
-              <p className="font-semibold text-white">
-                No encontramos nada con estos filtros.
+          ) : errorMessage ? (
+            <div
+              style={{
+                padding: 16,
+                borderRadius: 'var(--radius-sm, 4px)',
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}
+            >
+              <p style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 'var(--text-body)', margin: 0 }}>
+                Error al consultar el catálogo celeste
               </p>
-              <p>
-                Prueba ampliando el radio con el deslizador o seleccionando el filtro &quot;Todos&quot;.
+              <p style={{ fontSize: 'var(--text-caption)', color: 'var(--mute)', margin: 0 }}>
+                {errorMessage}
               </p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => executeSearch(activeCoords.ra, activeCoords.dec, radiusArcmin)}
+                  className="btn-primary"
+                  style={{ padding: '6px 14px' }}
+                >
+                  Reintentar búsqueda
+                </button>
+              </div>
+            </div>
+          ) : displayedResults.length === 0 ? (
+            <div
+              style={{
+                padding: 20,
+                borderRadius: 'var(--radius-sm, 4px)',
+                background: 'var(--panel-raised)',
+                border: '1px solid var(--line)',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}
+            >
+              <p style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 'var(--text-body)', margin: 0 }}>
+                Sin resultados en este radio
+              </p>
+              <p style={{ fontSize: 'var(--text-caption)', color: 'var(--mute)', margin: 0 }}>
+                No encontramos objetos dentro de {radiusArcmin}′ con los filtros activos.
+              </p>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setRadiusArcmin(Math.min(60, Math.max(20, radiusArcmin * 2)))}
+                  className="btn-ghost"
+                >
+                  Sube el radio a {Math.min(60, Math.max(20, radiusArcmin * 2))}′
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilters(['all'])}
+                  className="btn-ghost"
+                >
+                  Activar filtro &quot;Todos&quot;
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="space-y-2 pb-6">
-              {results.map((item) => {
+            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
+              {displayedResults.map((item: ConeResult) => {
                 const isHovered = hoveredResultId === item.id;
+                const isCenter = item.sepArcsec === 0;
+                const isDetailsOpen = expandedDetailsId === item.id;
+
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    onClick={() => {
-                      sound.playTargetSelect();
-                      onSelectResult(item);
-                      onClose();
-                    }}
                     onMouseEnter={() => setHoveredResultId(item.id)}
                     onMouseLeave={() => setHoveredResultId(null)}
-                    className={`w-full text-left p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 group ${
-                      isHovered
-                        ? 'bg-[#1e224d] border-[#ff5a7e] shadow-lg -translate-y-0.5'
-                        : 'bg-[#0a0d1f] border-[#272a4f] hover:border-[#ff5a7e]/60'
-                    }`}
+                    style={{
+                      borderBottom: '1px solid var(--line)',
+                      background: isHovered ? 'var(--panel-raised)' : 'transparent',
+                      transition: 'background 0.12s',
+                    }}
                   >
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      {/* Marker Number Badge */}
-                      <span className="w-6 h-6 rounded-full bg-[#ff5a7e] text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm mt-0.5">
-                        {item.number}
-                      </span>
+                    {/* Main Row Clickable Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sound.playTargetSelect();
+                        onSelectResult(item);
+                        onClose();
+                      }}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '10px 4px',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'inherit',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0 }}>
+                        {/* Marker Number Pill */}
+                        <span
+                          style={{
+                            width: 22,
+                            height: 22,
+                            borderRadius: '50%',
+                            fontVariantNumeric: 'tabular-nums',
+                            fontWeight: 700,
+                            fontSize: '0.68rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            marginTop: 1,
+                            background: isCenter
+                              ? 'var(--ink)'
+                              : item.isColdCandidate || item.pmArcsecPerYear >= 0.20
+                              ? 'var(--alert)'
+                              : 'var(--panel-raised)',
+                            color: isCenter
+                              ? 'var(--panel)'
+                              : item.isColdCandidate || item.pmArcsecPerYear >= 0.20
+                              ? '#fff'
+                              : 'var(--ink)',
+                            border: `1px solid ${isCenter ? 'var(--ink)' : 'var(--line)'}`,
+                          }}
+                        >
+                          {item.number}
+                        </span>
 
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h3 className="font-extrabold text-white text-xs sm:text-sm truncate group-hover:text-[#ff5a7e] transition-colors">
-                            {item.name}
-                          </h3>
+                        <div style={{ minWidth: 0 }}>
+                          {/* Name and Candidate Badges */}
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 'var(--text-body)' }}>
+                              {item.name}
+                            </span>
+                            {item.isCandidate && (
+                              <span
+                                style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: 600,
+                                  color: 'var(--alert)',
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                Candidato
+                              </span>
+                            )}
+                            {item.isColdCandidate && (
+                              <span
+                                style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: 600,
+                                  color: '#38bdf8',
+                                }}
+                              >
+                                Sin pareja en Gaia
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Kind in plain language */}
+                          <p style={{ fontSize: 'var(--text-caption)', color: 'var(--mute)', margin: '2px 0 0' }}>
+                            {item.kindLabel}
+                          </p>
+
+                          {/* Speed & Distance */}
+                          <p style={{ fontSize: 'var(--text-data)', color: item.pmArcsecPerYear >= 0.20 ? 'var(--alert)' : 'var(--mute)', margin: '2px 0 0', fontVariantNumeric: 'tabular-nums', fontWeight: item.pmArcsecPerYear >= 0.20 ? 600 : 400 }}>
+                            {formatMovementSpeed(item.pmArcsecPerYear)}
+                            {item.distanceLy && ` · ${item.distanceLy}`}
+                          </p>
+
+                          {/* Scientific justification in 1 human sentence */}
+                          {item.interestReason && (
+                            <p style={{ fontSize: 'var(--text-caption)', color: 'var(--ink)', margin: '4px 0 0', lineHeight: 1.4 }}>
+                              {item.interestReason}
+                            </p>
+                          )}
                         </div>
+                      </div>
 
-                        {/* Kind in clean human language */}
-                        <p className="text-[11px] text-[#ff5a7e] font-semibold mt-0.5 truncate">
-                          {item.kindLabel}
-                        </p>
+                      {/* Right Column: Distance & Score */}
+                      <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--ink)', fontSize: 'var(--text-caption)' }}>
+                          {isCenter ? '0″ (Centro)' : `A ${formatSeparation(item.sepArcsec)}`}
+                        </span>
+                        <span style={{ fontSize: 'var(--text-data)', color: 'var(--mute)' }}>
+                          {isCenter ? 'Referencia' : 'del centro'}
+                        </span>
+                        <span style={{ fontSize: '0.68rem', fontVariantNumeric: 'tabular-nums', color: 'var(--mute)', marginTop: 2 }}>
+                          {item.interestScore} pts
+                        </span>
+                      </div>
+                    </button>
 
-                        {/* Movement speed */}
-                        <p className="text-[11px] text-[#9a95b8] mt-0.5">
-                          {formatMovementSpeed(item.pmArcsecPerYear)}
-                          {item.distanceLy && ` · ${item.distanceLy}`}
-                        </p>
+                    {/* Bottom Toolbar of the Item: Catalog Sources & Raw Technical Drawer */}
+                    <div
+                      style={{
+                        padding: '4px 4px 8px 32px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: 'var(--text-data)',
+                        color: 'var(--mute)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>Fuente:</span>
+                        <span>
+                          {item.source === 'crossmatch' || (item.source as string) === 'federated'
+                            ? 'SIMBAD + Gaia'
+                            : item.source.toUpperCase()}
+                        </span>
+                        {item.w1MinusW2 !== undefined && <span>· CatWISE</span>}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {onHuntArea && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              sound.playTargetSelect();
+                              onSelectResult(item);
+                              onHuntArea();
+                              onClose();
+                            }}
+                            className="link-text"
+                            style={{ fontSize: 'var(--text-data)', color: 'var(--alert)' }}
+                          >
+                            Cazar en visor
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedDetailsId(isDetailsOpen ? null : item.id);
+                          }}
+                          className="link-text"
+                          style={{ fontSize: 'var(--text-data)' }}
+                        >
+                          {isDetailsOpen ? 'Ocultar datos' : 'Datos técnicos'}
+                        </button>
                       </div>
                     </div>
 
-                    {/* Distance from search center */}
-                    <div className="text-right shrink-0">
-                      <span className="block font-mono font-bold text-white text-xs">
-                        {formatSeparation(item.sepArcsec)}
-                      </span>
-                      <span className="text-[10px] text-[#9a95b8]">del centro</span>
-                    </div>
-                  </button>
+                    {/* Raw Scientific Parameters Drawer */}
+                    {isDetailsOpen && (
+                      <div
+                        style={{
+                          margin: '0 4px 8px 32px',
+                          padding: '8px 10px',
+                          background: 'var(--panel-raised)',
+                          border: '1px solid var(--line)',
+                          borderRadius: 'var(--radius-sm, 4px)',
+                          fontSize: 'var(--text-data)',
+                          fontVariantNumeric: 'tabular-nums',
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(2, 1fr)',
+                          gap: 6,
+                        }}
+                      >
+                        <div>
+                          <span style={{ color: 'var(--mute)', display: 'block' }}>RA / Dec (ICRS):</span>
+                          <span>{item.ra.toFixed(5)}°, {item.dec.toFixed(5)}°</span>
+                        </div>
+                        <div>
+                          <span style={{ color: 'var(--mute)', display: 'block' }}>Movimiento propio:</span>
+                          <span>
+                            pmRA: {item.pmRa.toFixed(1)} · pmDE: {item.pmDec.toFixed(1)} mas/a
+                          </span>
+                        </div>
+                        <div>
+                          <span style={{ color: 'var(--mute)', display: 'block' }}>Tipo de objeto SIMBAD:</span>
+                          <span>{item.kindCode} ({item.kindLabel})</span>
+                        </div>
+                        <div>
+                          <span style={{ color: 'var(--mute)', display: 'block' }}>Color infrarrojo W1−W2:</span>
+                          <span>
+                            {item.w1MinusW2 !== undefined ? `${item.w1MinusW2.toFixed(2)} mag` : 'No medido'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

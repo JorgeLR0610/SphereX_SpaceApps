@@ -1,15 +1,18 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { useSpherexStore, spherexStore } from '../store/useSpherexStore';
+import { spherexStore } from '../store/useSpherexStore';
+import { useLocale } from './useLocale';
 import { useDataMode } from './useDataMode';
-import { getColormapLut, applyStretch } from '../lib/colormaps';
+import { computeProcessedBuffer, renderImage } from '../lib/renderEngine';
+import { exportTimelapseGif, exportComparisonCard } from '../lib/exportUtils';
+import { useFrameData } from '../lib/useFrameData';
 import { pixelToCelestial, computeProperMotionDisplacement } from '../lib/wcs';
 import { getCatalogMarkers } from '../lib/mockData';
-import { createAnimatedGif } from '../lib/gifEncoder';
 
 export function FrameViewer() {
   const realMode = useDataMode();
+  const {text}=useLocale();
   const {
     frames,
     epochs,
@@ -34,11 +37,14 @@ export function FrameViewer() {
     playing,
     fps,
     provenance,
-  } = useSpherexStore();
+  } = useFrameData();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  const [curtain, setCurtain] = useState(false);
+  const [split, setSplit] = useState(.5);
+  const [hunter, setHunter] = useState(false);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -84,160 +90,13 @@ export function FrameViewer() {
     }
   }, [detectiveFound]);
 
-  // Compute processed image buffer for current settings (256x256)
-  const computeDisplayBuffer = useCallback((targetEpoch?: number): Float32Array | null => {
-    if (!frames || frames.length === 0) return null;
-
-    const size = frames[0].width;
-    const numPixels = size * size;
-    const epIdx = targetEpoch !== undefined ? targetEpoch : currentEpoch;
-
-    const activeDetIndices = detectors
-      .map((active, idx) => (active ? idx + 1 : null))
-      .filter((d): d is number => d !== null);
-
-    if (activeDetIndices.length === 0) return null;
-
-    if (mode === 'stack') {
-      // Stack mode: average across all epochs and active detectors
-      const stacked = new Float32Array(numPixels);
-      let count = 0;
-
-      frames.forEach(f => {
-        if (activeDetIndices.includes(f.detector)) {
-          for (let i = 0; i < numPixels; i++) {
-            stacked[i] += f.pixelData[i];
-          }
-          count++;
-        }
-      });
-
-      if (count > 0) {
-        for (let i = 0; i < numPixels; i++) stacked[i] /= count;
-      }
-      return stacked;
-    }
-
-    if (mode === 'diff') {
-      // Difference mode: targetEpoch frames - reference frames
-      const currentEpochFrames = frames.filter(
-        f => f.epochIndex === epIdx && activeDetIndices.includes(f.detector)
-      );
-
-      let refFrames: typeof frames = [];
-      if (diffRef === 'first') {
-        refFrames = frames.filter(f => f.epochIndex === 0 && activeDetIndices.includes(f.detector));
-      } else if (diffRef === 'previous') {
-        const prevIdx = Math.max(0, epIdx - 1);
-        refFrames = frames.filter(f => f.epochIndex === prevIdx && activeDetIndices.includes(f.detector));
-      } else {
-        refFrames = frames.filter(f => f.epochIndex !== epIdx && activeDetIndices.includes(f.detector));
-      }
-
-      if (currentEpochFrames.length === 0 || refFrames.length === 0) return null;
-
-      const currCombined = new Float32Array(numPixels);
-      currentEpochFrames.forEach(f => {
-        for (let i = 0; i < numPixels; i++) currCombined[i] += f.pixelData[i];
-      });
-      for (let i = 0; i < numPixels; i++) currCombined[i] /= currentEpochFrames.length;
-
-      const refCombined = new Float32Array(numPixels);
-      refFrames.forEach(f => {
-        for (let i = 0; i < numPixels; i++) refCombined[i] += f.pixelData[i];
-      });
-      for (let i = 0; i < numPixels; i++) if (diffRef === 'median') {
-          const values = refFrames.map(f => f.pixelData[i]).sort((a,b) => a-b);
-          const mid = Math.floor(values.length / 2);
-          refCombined[i] = values.length % 2 ? values[mid] : (values[mid-1] + values[mid]) / 2;
-        } else refCombined[i] /= refFrames.length;
-
-      const diffBuffer = new Float32Array(numPixels);
-      for (let i = 0; i < numPixels; i++) {
-        diffBuffer[i] = currCombined[i] - refCombined[i];
-      }
-      return diffBuffer;
-    }
-
-    // Normal mode: combine active detectors at target epoch
-    const currentEpochFrames = frames.filter(
-      f => f.epochIndex === epIdx && activeDetIndices.includes(f.detector)
-    );
-
-    if (currentEpochFrames.length === 0) return null;
-
-    const normalBuffer = new Float32Array(numPixels);
-    currentEpochFrames.forEach(f => {
-      for (let i = 0; i < numPixels; i++) normalBuffer[i] += f.pixelData[i];
-    });
-
-    if (!sumDetectors && currentEpochFrames.length > 1) {
-      for (let i = 0; i < numPixels; i++) normalBuffer[i] /= currentEpochFrames.length;
-    }
-
-    return normalBuffer;
-  }, [frames, currentEpoch, detectors, sumDetectors, mode, diffRef]);
-
-  // Main canvas rendering effect
+  const computeDisplayBuffer = useCallback((epoch = currentEpoch) => computeProcessedBuffer(frames,epoch,detectors,mode,diffRef,sumDetectors)?.buffer || null, [frames,currentEpoch,detectors,mode,diffRef,sumDetectors]);
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const buffer = computeDisplayBuffer();
-    if (!buffer || !frames || frames.length === 0) {
-      ctx.fillStyle = '#020617';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      return;
-    }
-
-    const size = frames[0].width;
-    canvas.width = size;
-    canvas.height = size;
-
-    const imgData = ctx.createImageData(size, size);
-    const data32 = new Uint32Array(imgData.data.buffer);
-    const lut = getColormapLut(colormap);
-
-    const epIdx = currentEpoch;
-    const currentFrameObj = frames.find(f => f.epochIndex === epIdx && detectors[f.detector - 1]) || frames[0];
-    const validMask = currentFrameObj?.validMask;
-
-    if (mode === 'diff') {
-      // Symmetrical difference stretch around 0
-      const diffRange = Math.max(0.000001, (stretch.max - stretch.min) * 0.45);
-      for (let i = 0; i < buffer.length; i++) {
-        if (validMask && validMask[i] === 0) {
-          // Muted slate blue #2b3d5b (r: 43, g: 61, b: 91)
-          data32[i] = (255 << 24) | (91 << 16) | (61 << 8) | 43;
-          continue;
-        }
-        const val = buffer[i];
-        const norm = Math.max(0, Math.min(1, (val + diffRange) / (2 * diffRange)));
-        const lutIdx = Math.floor(norm * 255);
-        const color = lut[lutIdx] || lut[128];
-        data32[i] = (255 << 24) | (color.b << 16) | (color.g << 8) | color.r;
-      }
-    } else {
-      // Normal or Stack stretch
-      for (let i = 0; i < buffer.length; i++) {
-        if (validMask && validMask[i] === 0) {
-          // Muted slate blue #2b3d5b (r: 43, g: 61, b: 91)
-          data32[i] = (255 << 24) | (91 << 16) | (61 << 8) | 43;
-          continue;
-        }
-        const val = buffer[i];
-        const stretched = applyStretch(val, stretch.min, stretch.max, stretch.fn);
-        const lutIdx = Math.floor(Math.max(0, Math.min(1, stretched)) * 255);
-        const color = lut[lutIdx] || lut[0];
-        data32[i] = (255 << 24) | (color.b << 16) | (color.g << 8) | color.r;
-      }
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-  }, [computeDisplayBuffer, colormap, mode, stretch, frames, currentEpoch, detectors]);
+    const canvas=canvasRef.current;const ctx=canvas?.getContext('2d');if(!canvas||!ctx)return;
+    const image=renderImage(frames,currentEpoch,detectors,mode,diffRef,stretch,colormap,sumDetectors,curtain?split:undefined);
+    if(!image){ctx.clearRect(0,0,canvas.width,canvas.height);return;}
+    canvas.width=image.width;canvas.height=image.height;ctx.putImageData(image,0,0);
+  },[frames,currentEpoch,detectors,mode,diffRef,stretch,colormap,sumDetectors,curtain,split]);
 
   // Coordinate mouse inspection
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -316,7 +175,7 @@ export function FrameViewer() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const link = document.createElement('a');
-    link.download = `SPHEREx_${spherexStore.getState().target.name || 'cutout'}_Epoch${currentEpoch + 1}_${mode}.png`;
+    link.download = `SPHEREx_${realMode?"observed":"simulation"}_${spherexStore.getState().target.name || 'cutout'}_Epoch${currentEpoch + 1}_${mode}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
   };
@@ -326,55 +185,7 @@ export function FrameViewer() {
     if (!frames || frames.length === 0 || isExportingGif) return;
     try {
       setIsExportingGif(true);
-      const size = frames[0].width;
-      const offCanvas = document.createElement('canvas');
-      offCanvas.width = size;
-      offCanvas.height = size;
-      const ctx = offCanvas.getContext('2d');
-      if (!ctx) return;
-
-      const lut = getColormapLut(colormap);
-      const gifFrames: { imageData: ImageData; delayMs: number }[] = [];
-
-      for (let ep = 0; ep < epochs.length; ep++) {
-        const buf = computeDisplayBuffer(ep);
-        if (!buf) continue;
-        const imgData = ctx.createImageData(size, size);
-        const d32 = new Uint32Array(imgData.data.buffer);
-
-        if (mode === 'diff') {
-          const diffRange = Math.max(0.000001, (stretch.max - stretch.min) * 0.45);
-          for (let i = 0; i < buf.length; i++) {
-            if (frames.find(f => f.epochIndex === ep)?.validMask?.[i] === 0) { d32[i] = (255 << 24) | (91 << 16) | (61 << 8) | 43; continue; }
-            const val = buf[i];
-            const norm = Math.max(0, Math.min(1, (val + diffRange) / (2 * diffRange)));
-            const c = lut[Math.floor(norm * 255)] || lut[128];
-            d32[i] = (255 << 24) | (c.b << 16) | (c.g << 8) | c.r;
-          }
-        } else {
-          for (let i = 0; i < buf.length; i++) {
-            if (frames.find(f => f.epochIndex === ep)?.validMask?.[i] === 0) { d32[i] = (255 << 24) | (91 << 16) | (61 << 8) | 43; continue; }
-            const s = applyStretch(buf[i], stretch.min, stretch.max, stretch.fn);
-            const c = lut[Math.floor(Math.max(0, Math.min(1, s)) * 255)] || lut[0];
-            d32[i] = (255 << 24) | (c.b << 16) | (c.g << 8) | c.r;
-          }
-        }
-
-        ctx.putImageData(imgData, 0, 0);
-
-        gifFrames.push({
-          imageData: ctx.getImageData(0, 0, size, size),
-          delayMs: Math.round(1000 / Math.max(1, fps)),
-        });
-      }
-
-      const gifBlob = createAnimatedGif(gifFrames);
-      const url = URL.createObjectURL(gifBlob);
-      const link = document.createElement('a');
-      link.download = `SPHEREx_TimeMachine_${spherexStore.getState().target.name || 'target'}_animated.gif`;
-      link.href = url;
-      link.click();
-      URL.revokeObjectURL(url);
+      exportTimelapseGif(frames,detectors,mode,diffRef,stretch,colormap,fps,sumDetectors);
     } finally {
       setIsExportingGif(false);
     }
@@ -527,15 +338,16 @@ export function FrameViewer() {
           <canvas
             ref={canvasRef}
             width={frameSize}
-            height={frameSize}
+            height={frames[0]?.height || frameSize}
             className="w-[360px] h-[360px] sm:w-[440px] sm:h-[440px] md:w-[480px] md:h-[480px] rounded-xl shadow-2xl border-2 border-slate-800/90 [image-rendering:pixelated]"
           />
 
           {/* SVG Vector Overlays */}
           <svg
-            viewBox={`0 0 ${frameSize} ${frameSize}`}
+            viewBox={`0 0 ${frameSize} ${frames[0]?.height || frameSize}`}
             className="absolute inset-0 w-full h-full pointer-events-none"
           >
+            {hunter && !realMode && frames.find(f=>f.epochIndex===currentEpoch)?.movingTargetPixel && <circle cx={frames.find(f=>f.epochIndex===currentEpoch)!.movingTargetPixel!.x} cy={frames.find(f=>f.epochIndex===currentEpoch)!.movingTargetPixel!.y} r={12} fill="none" stroke="#ff9a6c" strokeWidth={1} strokeDasharray="3 2"/>}
             {/* Multi-Exposure Ghosting Mode */}
             {!isRealData && overlays.ghostingTrail && (
               <g>
@@ -741,22 +553,28 @@ export function FrameViewer() {
         </div>
       </div>
 
+      {curtain && <p className="viewer-caption">Cortina: {epochs[0]?.date.slice(0,10)} UTC (izquierda) / {epochs[epochs.length-1]?.date.slice(0,10)} UTC (derecha)</p>}
+      {hunter && !realMode && <p className="viewer-caption">Cazador educativo: posición generada {frames.find(f=>f.epochIndex===currentEpoch)?.movingTargetPixel?.x.toFixed(1)}, {frames.find(f=>f.epochIndex===currentEpoch)?.movingTargetPixel?.y.toFixed(1)} px. No es detección automática.</p>}
       <div className="temporal-controls">
         <div className="temporal-actions">
           <div className="playback-actions">
             <button aria-label="Observación anterior" disabled={isLoading || !epochs.length || !!error} onClick={() => { spherexStore.stopPlayback(); spherexStore.prevEpoch(); }}>←</button>
-            <button className="primary-action" disabled={isLoading || epochs.length < 2 || !!error} onClick={() => spherexStore.toggleBlinkMode()}>{blinkMode ? 'Pausar parpadeo' : 'Activar parpadeo'}</button>
+            <button className="primary-action" disabled={isLoading || epochs.length < 2 || !!error} onClick={() => {setCurtain(false);spherexStore.toggleBlinkMode();}}>{blinkMode ? text.pause : text.blink}</button>
             <button aria-label="Observación siguiente" disabled={isLoading || !epochs.length || !!error} onClick={() => { spherexStore.stopPlayback(); spherexStore.nextEpoch(); }}>→</button>
           </div>
           <div className="mode-selector" role="group" aria-label="Modo de visualización">
-            {(['normal', 'diff'] as const).map(m => <button key={m} disabled={!frames.length || !!error} aria-pressed={mode === m} onClick={() => spherexStore.setMode(m)}>{m === 'normal' ? 'Normal' : 'Diferencia'}</button>)}
+            {(['normal', 'diff'] as const).map(m => <button key={m} disabled={!frames.length || !!error} aria-pressed={mode === m} onClick={() => {setCurtain(false);spherexStore.setMode(m);}}>{m === 'normal' ? text.normal : text.diff}</button>)}
           </div>
         </div>
         <p className="active-date">Fecha activa: {epochs[currentEpoch]?.date.slice(0,10) || 'Sin observación'} UTC{mode === 'stack' ? ' · Apilado' : ''}</p>
         <div className="epoch-selector" role="group" aria-label="Fechas de observación">
           {epochs.map((ep, idx) => <button key={ep.epoch} disabled={!!error} aria-pressed={idx === currentEpoch} onClick={() => { spherexStore.stopPlayback(); spherexStore.setCurrentEpoch(idx); }}><span>Observación {idx + 1}</span><strong>{new Date(ep.date).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</strong></button>)}
         </div>
-        <details className="viewer-advanced"><summary>Exportación e inspección de píxeles</summary><div>
+        <details className="viewer-advanced"><summary>Comparación avanzada, exportación e inspección</summary><div>
+          <label><input type="checkbox" checked={curtain} onChange={e=>{spherexStore.stopPlayback();spherexStore.setMode('normal');setCurtain(e.target.checked);}} /> Cortina comparadora</label>
+          {curtain && <label>Posición de cortina<input aria-label="Posición de cortina" type="range" min="0" max="1" step="0.01" value={split} onChange={e=>setSplit(Number(e.target.value))}/></label>}
+          {!realMode && <label><input type="checkbox" checked={hunter} onChange={e=>setHunter(e.target.checked)}/>Cazador educativo · Simulación</label>}
+          <button disabled={!frames.length} onClick={()=>{if(canvasRef.current)exportComparisonCard(canvasRef.current,target.name||'M101',epochs.map(e=>e.date.slice(0,10)).join(' / '),realMode);}}>Exportar ficha</button>
           <button disabled={!frames.length} onClick={downloadSnapshot}>Descargar PNG</button><button disabled={!frames.length || isExportingGif} onClick={exportAnimatedGifAction}>Descargar GIF</button>
           <form onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); spherexStore.setSelectedPixel({x: Number(data.get('x')), y: Number(data.get('y'))}); }}><label>Píxel X<input name="x" type="number" min="0" max={wcs.size[0]-1} defaultValue="0" required /></label><label>Píxel Y<input name="y" type="number" min="0" max={wcs.size[1]-1} defaultValue="0" required /></label><button>Inspeccionar</button></form>
         </div></details>

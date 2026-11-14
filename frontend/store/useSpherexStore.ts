@@ -155,6 +155,9 @@ const initialState: SpherexState = {
   isAudioMuted: false,
 };
 
+let frameRequest=0;
+let spectrumRequest=0;
+let frameController: AbortController | undefined;
 let state: SpherexState = { ...initialState };
 const listeners = new Set<() => void>();
 
@@ -169,6 +172,7 @@ function syncUrl() {
   const currentParams = new URLSearchParams(window.location.search);
   const p = new URLSearchParams();
   p.set('view', 'observatory');
+  if(currentParams.has('lang'))p.set('lang',currentParams.get('lang')!);
   if (currentParams.has('api')) {
     p.set('api', currentParams.get('api')!);
   }
@@ -475,8 +479,11 @@ export const spherexStore = {
   },
 
   loadFrames: async () => {
+    const request=++frameRequest; ++spectrumRequest;
+    frameController?.abort(); frameController=new AbortController();
+
     try {
-      state = { ...state, isLoading: true, error: null };
+      state = { ...state, frames: [], epochs: [], spectrum: undefined, provenance: undefined, playing:false, blinkMode:false, isLoading: true, error: null };
       emitChange();
 
       const response: FramesResponse = await api.getFrames({
@@ -484,7 +491,8 @@ export const spherexStore = {
         dec: state.target.dec,
         fov: state.fov,
         targetName: state.target.name,
-      });
+      }, frameController.signal);
+      if(request!==frameRequest)return;
 
       if (!response.frames.length || !response.epochs.length) throw new Error('No hay observaciones disponibles para comparar.');
 
@@ -552,6 +560,7 @@ export const spherexStore = {
         spherexStore.loadSpectrum(state.selectedPixel, response);
       }
     } catch (err) {
+      if(request!==frameRequest)return;
       state = {
         ...state,
         isLoading: false,
@@ -565,12 +574,14 @@ export const spherexStore = {
     pixel: { x: number; y: number },
     cachedFrames?: FramesResponse
   ) => {
+    const request=++spectrumRequest;
     try {
       const spectrum = await api.getSpectrum(
         { ra: state.target.ra, dec: state.target.dec, fov: state.fov },
         pixel,
         cachedFrames
       );
+      if(request!==spectrumRequest)return;
       state = { ...state, spectrum };
       emitChange();
     } catch (err) {
